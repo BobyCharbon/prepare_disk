@@ -3,6 +3,12 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.3.0 — 30 octobre 2026
+
+- Mode administrateur activable d'un clic, en haut de Versions validées : on peut changer et télécharger d'autres versions sans rien publier, et publier seulement si on le veut.
+- En coupant le mode administrateur, le Mac revient à la liste publiée.
+- « Versions validées » est maintenant tout en haut du menu, et « Préparer un disque » a sa propre section.
+
 ## 1.2.0 — 30 octobre 2026
 
 - Versions validées centralisées : l'administrateur choisit les versions et les publie, tous les Mac les reçoivent automatiquement (au démarrage et toutes les 30 minutes).

@@ -41,12 +41,17 @@ final class ValidatedStore {
     var lastCheck: Date?
     var error: String?
     var isPublishing = false
-    /// Mode administrateur : un jeton GitHub avec droit d'écriture est enregistré dans le trousseau.
-    var isAdmin: Bool
+    /// Un jeton GitHub avec droit d'écriture est enregistré dans le trousseau.
+    var hasToken: Bool
+    /// Interrupteur du mode administrateur (en un clic, une fois le jeton enregistré).
+    var adminMode: Bool { didSet { defaults.set(adminMode, forKey: "adminMode") } }
+    /// Mode administrateur : on choisit librement ses versions, et on peut les publier pour tous.
+    var isAdmin: Bool { hasToken && adminMode }
 
     init() {
         published = defaults.data(forKey: "validatedVersions").flatMap { try? JSONDecoder().decode(ValidatedVersions.self, from: $0) }
-        isAdmin = Keychain.read() != nil
+        hasToken = Keychain.read() != nil
+        adminMode = defaults.bool(forKey: "adminMode")
     }
 
     private func request(_ method: String = "GET", accept: String = "application/vnd.github+json") -> URLRequest {
@@ -97,13 +102,16 @@ final class ValidatedStore {
               let repo = try? JSONDecoder().decode(Repo.self, from: data) else { return "GitHub injoignable ou jeton invalide." }
         guard repo.permissions?.push == true else { return "Ce jeton n'a pas le droit de modifier le dépôt." }
         Keychain.save(token)
-        isAdmin = true
+        hasToken = true
+        adminMode = true
         return nil
     }
 
-    func disableAdmin() {
+    /// Oublie le jeton (ce Mac ne pourra plus publier).
+    func forgetToken() {
         Keychain.delete()
-        isAdmin = false
+        hasToken = false
+        adminMode = false
     }
 
     /// Publie les versions réglées sur ce Mac pour tous les Mac.

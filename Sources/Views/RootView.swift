@@ -6,7 +6,8 @@ struct RootView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $model.page) {
-                Section("Préparation") { row(.prepare); row(.versions) }
+                Section("Versions") { row(.versions) }
+                Section("Préparation") { row(.prepare) }
                 Section("Contenu") { row(.library); row(.ipsw) }
                 Section("Matériel") { row(.disks) }
                 Section("Suivi") { row(.downloads); row(.history); row(.log) }

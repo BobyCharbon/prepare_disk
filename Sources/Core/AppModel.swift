@@ -193,6 +193,12 @@ final class AppModel {
         }
     }
 
+    /// Active ou coupe le mode administrateur. En le coupant, ce Mac revient à la liste publiée.
+    func setAdminMode(_ on: Bool) {
+        validated.adminMode = on
+        if !on { Task { await syncValidated(notify: false) } }
+    }
+
     func publishValidated() async -> String? {
         await validated.publish(ValidatedVersions(from: settings))
     }

@@ -194,35 +194,70 @@ struct VersionsView: View {
     }
 }
 
-/// D'où viennent les versions : liste publiée par l'administrateur (verrouillée), ou mode administrateur.
+/// D'où viennent les versions : liste publiée par l'administrateur (verrouillée), ou mode administrateur
+/// (interrupteur en un clic : changer et télécharger d'autres versions, publier seulement si on le veut).
 private struct ValidatedBanner: View {
     @Bindable var model: AppModel
     @State private var message: String?
+    @State private var askingToken = false
+    @State private var token = ""
+    @State private var checking = false
 
     var body: some View {
         let store = model.validated
-        if store.isAdmin {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Banner(text: model.hasUnpublishedVersions
-                           ? "Mode administrateur : ces versions ne sont pas encore publiées. Les autres Mac gardent la liste du \(store.published?.updated ?? "—")."
-                           : "Mode administrateur : ces versions sont publiées (liste du \(store.published?.updated ?? "—")), tous les Mac les suivent.",
-                           color: model.hasUnpublishedVersions ? .orange : .green, icon: "person.badge.key.fill")
-                    if store.isPublishing {
-                        ProgressView().controlSize(.small)
-                    } else if model.hasUnpublishedVersions {
-                        Button("Publier pour tout le monde") {
-                            Task { message = await model.publishValidated() ?? "Publié : tous les Mac recevront ces versions au prochain démarrage ou dans les 30 minutes." }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: store.isAdmin ? "person.badge.key.fill" : "lock.fill")
+                    .foregroundStyle(store.isAdmin ? Color.orange : Color.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.isAdmin ? "Mode administrateur" : "Versions validées par l'administrateur").fontWeight(.semibold)
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
-                if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+                Spacer()
+                if store.isPublishing {
+                    ProgressView().controlSize(.small)
+                } else if store.isAdmin && model.hasUnpublishedVersions {
+                    Button("Publier pour tout le monde") {
+                        Task { message = await model.publishValidated() ?? "Publié : tous les Mac recevront ces versions au prochain démarrage ou dans les 30 minutes." }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                Toggle("Administrateur", isOn: Binding(
+                    get: { store.isAdmin || askingToken },
+                    set: { on in
+                        if on && !store.hasToken { askingToken = true } else { askingToken = false; model.setAdminMode(on) }
+                    }))
+                    .toggleStyle(.switch)
+                    .help("Changer librement les versions (et les télécharger) ; « Publier » les envoie à tous les Mac.")
             }
-        } else if let published = store.published {
-            Banner(text: "Versions validées par l'administrateur (liste du \(published.updated)). Elles se mettent à jour toutes seules ; téléchargez ce qui manque avec « Tout télécharger ».",
-                   color: .blue, icon: "lock.fill")
+            if askingToken && !store.hasToken {
+                HStack {
+                    SecureField("Jeton GitHub (une seule fois — voir Réglages › Administration)", text: $token)
+                    Button("Activer") {
+                        checking = true
+                        Task {
+                            message = await store.enableAdmin(token: token.trimmingCharacters(in: .whitespacesAndNewlines))
+                            if message == nil { token = ""; askingToken = false }
+                            checking = false
+                        }
+                    }
+                    .disabled(token.isEmpty || checking)
+                }
+            }
+            if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+            if let error = store.error { Text(error).font(.caption).foregroundStyle(.orange) }
         }
-        if let error = store.error { Banner(text: error) }
+        .padding(12)
+        .background((store.isAdmin ? Color.orange : Color.blue).opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var subtitle: String {
+        let date = model.validated.published?.updated ?? "—"
+        guard model.validated.isAdmin else {
+            return "Liste du \(date), mise à jour toute seule. Téléchargez ce qui manque avec « Tout télécharger »."
+        }
+        return model.hasUnpublishedVersions
+            ? "Vos versions diffèrent de la liste publiée (du \(date)) : téléchargez-les librement, et publiez seulement si vous le voulez."
+            : "Vos versions sont celles publiées (liste du \(date)). Changez-les librement : rien n'est publié sans clic sur « Publier »."
     }
 }

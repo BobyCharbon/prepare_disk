@@ -213,12 +213,13 @@ private struct AdminSettings: View {
 
     var body: some View {
         Form {
-            if model.validated.isAdmin {
-                Section("Mode administrateur activé") {
+            if model.validated.hasToken {
+                Section("Administrateur") {
                     Text("Changez les versions dans « Versions validées », puis cliquez sur « Publier pour tout le monde ». Les autres Mac les reçoivent au démarrage ou dans les 30 minutes.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Button("Quitter le mode administrateur", role: .destructive) {
-                        model.validated.disableAdmin()
+                    Toggle("Mode administrateur", isOn: Binding(get: { model.validated.adminMode }, set: { model.setAdminMode($0) }))
+                    Button("Oublier le jeton de ce Mac", role: .destructive) {
+                        model.validated.forgetToken()
                         Task { await model.syncValidated(notify: false) }
                     }
                 }
