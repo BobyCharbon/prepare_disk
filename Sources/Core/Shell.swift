@@ -62,8 +62,12 @@ enum Shell {
     /// sudo garde Prepare Disk comme « app responsable » : son Accès complet au disque s'applique au script root.
     /// (Avec osascript « with administrator privileges », le script root en était privé : écriture refusée sur les disques externes.)
     /// Renvoie cancelled = true si l'utilisateur a annulé la demande.
+    /// false dans l'agent d'arrière-plan : aucune fenêtre ne doit s'ouvrir.
+    @MainActor static var interactive = true
+
     @MainActor
     static func runAsAdmin(_ command: String) async -> (cancelled: Bool, output: String) {
+        guard interactive else { return (true, "") }   // agent en arrière-plan : pas de fenêtre de mot de passe
         var message = "Prepare Disk a besoin de votre mot de passe administrateur pour écrire sur le disque."
         while true {
             guard let password = askPassword(message) else { return (true, "") }

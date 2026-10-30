@@ -266,19 +266,22 @@ final class AppModel {
     func setAutoDownload(_ on: Bool) {
         settings.autoDownload = on
         // Sur un Mac de production, l'app doit tourner sans qu'on l'ouvre : ouverture à la session.
+        // Agent d'arrière-plan : télécharge même quand l'app est fermée (ouverture de session, puis toutes les 15 min).
+        let agent = SMAppService.agent(plistName: Agent.plist)
         do {
-            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-            loginItemNote = SMAppService.mainApp.status == .requiresApproval
-                ? "Autorisez Prepare Disk dans Réglages Système › Général › Ouverture pour qu'il démarre tout seul." : nil
+            if on { try agent.register() } else { try agent.unregister() }
+            loginItemNote = agent.status == .requiresApproval
+                ? "Autorisez Prepare Disk dans Réglages Système › Général › Ouverture (« Autoriser en arrière-plan »)." : nil
         } catch {
-            loginItemNote = on ? "Ouverture automatique à la session impossible : \(error.localizedDescription)" : nil
+            loginItemNote = on ? "Agent d'arrière-plan impossible à activer : \(error.localizedDescription)" : nil
         }
         if on { autoDownloadTick() }
     }
 
     /// Met en téléchargement tout ce qui manque. Un échec est retenté toutes les 2 minutes, sans fin.
     func autoDownloadTick() {
-        guard settings.autoDownload, !preparer.isRunning else { return }
+        // Pendant que l'agent d'arrière-plan travaille, c'est lui qui télécharge.
+        guard settings.autoDownload, !preparer.isRunning, !Agent.isRunning else { return }
         for kind in validatedChecklist().compactMap(\.download) {
             let key = DownloadJob(kind: kind).key
             if downloads.active.contains(where: { $0.key == key }) { continue }

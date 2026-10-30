@@ -8,7 +8,8 @@ APP="Prepare Disk.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp .build/release/PrepareDisk "$APP/Contents/MacOS/PrepareDisk"
-mkdir -p "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
+cp LaunchAgents/*.plist "$APP/Contents/Library/LaunchAgents/"   # agent d'arrière-plan (téléchargement automatique)
 cp CHANGELOG.md "$APP/Contents/Resources/CHANGELOG.md"
 cp Icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"   # régénérer : swift Icon/make_icon.swift Icon/AppIcon.png
 cat > "$APP/Contents/Info.plist" <<EOF

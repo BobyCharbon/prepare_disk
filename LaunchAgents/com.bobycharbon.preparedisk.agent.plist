@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.bobycharbon.preparedisk.agent</string>
+    <key>BundleProgram</key><string>Contents/MacOS/PrepareDisk</string>
+    <key>ProgramArguments</key>
+    <array><string>PrepareDisk</string><string>--agent</string></array>
+    <!-- À l'ouverture de session, puis toutes les 15 minutes (jamais deux à la fois). -->
+    <key>RunAtLoad</key><true/>
+    <key>StartInterval</key><integer>900</integer>
+    <key>ProcessType</key><string>Standard</string>
+</dict>
+</plist>

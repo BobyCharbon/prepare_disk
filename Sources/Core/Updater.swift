@@ -64,7 +64,7 @@ final class Updater {
     }
 
     /// Télécharge la nouvelle version, vérifie sa signature, remplace l'app et la relance.
-    func install() async {
+    func install(relaunch: Bool = true) async {
         guard let release else { return }
         state = .downloading(0)
         let result = await FileDownloader().download(release.download) { written, total in
@@ -91,11 +91,12 @@ final class Updater {
         } catch {
             return fail("impossible de remplacer l'app (\(error.localizedDescription)).")
         }
+        guard relaunch else { return }   // agent : la nouvelle version servira au prochain lancement
         // Relance une fois cette instance fermée.
-        let relaunch = Process()
-        relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
-        relaunch.arguments = ["-c", "sleep 1; /usr/bin/open \(Shell.quote(current))"]
-        try? relaunch.run()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 1; /usr/bin/open \(Shell.quote(current))"]
+        try? process.run()
         NSApp.terminate(nil)
     }
 

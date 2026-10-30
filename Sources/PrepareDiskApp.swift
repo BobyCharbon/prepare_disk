@@ -1,6 +1,5 @@
 import SwiftUI
 
-@main
 struct PrepareDiskApp: App {
     @State private var model = AppModel()
 
