@@ -3,6 +3,11 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.2 — 30 octobre 2026
+
+- Icône de la barre des menus plus lisible : un grand ✓ quand tout est à jour, une flèche pendant un téléchargement, un « ! » s'il manque quelque chose.
+- Les loops GarageBand ne sont plus dans Versions validées : elles se choisissent dans Préparer un disque.
+
 ## 1.5.1 — 30 octobre 2026
 
 - Corrigé : un installateur ou un IPSW vérifié pendant qu'on le copiait restait marqué « abîmé ». Il est maintenant revérifié dès qu'il change, et rien n'est vérifié tant qu'une copie est en cours.

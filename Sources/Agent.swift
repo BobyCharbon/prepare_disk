@@ -19,7 +19,7 @@ struct AgentApp: App {
         MenuBarExtra {
             AgentPanel(agent: agent)
         } label: {
-            Image(systemName: agent.symbol)
+            Image(systemName: agent.symbol).font(.system(size: 15, weight: .semibold))
         }
         .menuBarExtraStyle(.window)
     }
@@ -95,10 +95,16 @@ final class AgentModel {
             + external
     }
     var missing: Int { items.filter { $0.state != .ok }.count }
+    /// Grand symbole plein, lisible d'un coup d'œil dans la barre des menus.
     var symbol: String {
-        if !downloading.isEmpty { return "arrow.down.circle" }
+        if !downloading.isEmpty { return "arrow.down.circle.fill" }
         if items.isEmpty { return "externaldrive" }
-        return missing == 0 ? "externaldrive.badge.checkmark" : "externaldrive.badge.exclamationmark"
+        return missing == 0 ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+    }
+    var symbolColor: Color {
+        if !downloading.isEmpty { return .blue }
+        if items.isEmpty { return .secondary }
+        return missing == 0 ? .green : .orange
     }
 
     /// Suit les téléchargements de l'app ; quand l'un se termine, la liste est relue tout de suite.
@@ -164,8 +170,8 @@ struct AgentPanel: View {
     var body: some View {
         let model = agent.model
         VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: agent.symbol).font(.title2)
+            HStack(spacing: 10) {
+                Image(systemName: agent.symbol).font(.system(size: 34)).foregroundStyle(agent.symbolColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Prepare Disk").font(.headline)
                     Text(summary).font(.caption).foregroundStyle(.secondary)
