@@ -33,13 +33,16 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
-# Certificat fixe : macOS garde l'Accès complet au disque d'une version à l'autre.
-# Sans lui (autre Mac), signature ad hoc : l'autorisation est à redonner après chaque build.
-IDENTITY="Prepare Disk"
-if security find-identity -p codesigning | grep -q "\"$IDENTITY\""; then
-    codesign --force --sign "$IDENTITY" "$APP"
+# Signature : Developer ID (app reconnue par macOS partout, notarisable), sinon le certificat « Prepare Disk »,
+# sinon ad hoc. Un certificat fixe garde l'Accès complet au disque d'une version à l'autre.
+DEVELOPER_ID=$(security find-identity -v -p codesigning | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+if [ -n "$DEVELOPER_ID" ]; then
+    # Runtime renforcé + horodatage : obligatoires pour la notarisation d'Apple.
+    codesign --force --options runtime --timestamp --sign "$DEVELOPER_ID" "$APP"
+elif security find-identity -p codesigning | grep -q '"Prepare Disk"'; then
+    codesign --force --sign "Prepare Disk" "$APP"
 else
-    echo "ATTENTION : certificat « $IDENTITY » absent du trousseau, signature ad hoc."
+    echo "ATTENTION : aucun certificat dans le trousseau, signature ad hoc."
     codesign --force --sign - "$APP"
 fi
 # Toujours une copie zippée, prête à distribuer (c'est elle que publie GitHub).

@@ -8,7 +8,8 @@ import Observation
 final class Updater {
     static let repository = "BobyCharbon/prepare_disk"
     /// Seule une app signée avec notre certificat est installée (et garde l'Accès complet au disque).
-    static let requirement = #"identifier "com.bobycharbon.preparedisk" and certificate root = H"2a4993ddca84b3ae2874dce2ef7cd304c3947083""#
+    /// Accepte l'app signée Developer ID (équipe GS2B6GA9JA) ou, pendant la transition, l'ancien certificat « Prepare Disk ».
+    static let requirement = #"identifier "com.bobycharbon.preparedisk" and (anchor apple generic and certificate leaf[subject.OU] = "GS2B6GA9JA" or certificate root = H"2a4993ddca84b3ae2874dce2ef7cd304c3947083")"#
 
     struct Release: Equatable {
         let version: String
