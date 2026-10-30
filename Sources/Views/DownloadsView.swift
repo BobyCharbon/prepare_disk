@@ -6,6 +6,11 @@ struct DownloadsView: View {
 
     var body: some View {
         List {
+            if let total = totalSummary {
+                Section {
+                    Label(total, systemImage: "clock").font(.callout.monospacedDigit())
+                }
+            }
             if !model.downloads.external.isEmpty {
                 Section("En arrière-plan (icône de la barre des menus)") {
                     ForEach(model.downloads.external) { ExternalDownloadRow(download: $0).padding(.vertical, 4) }
@@ -29,6 +34,22 @@ struct DownloadsView: View {
                     .disabled(!model.downloads.jobs.contains { $0.isFinished })
             }
         }
+    }
+}
+
+extension DownloadsView {
+    /// Le temps restant pour tout : octets restants (en cours et en attente) ÷ vitesse totale actuelle.
+    /// Plus juste que la somme des temps de chaque fichier, puisqu'ils se partagent la connexion.
+    var totalSummary: String? {
+        let mine = model.downloads.active
+        let others = model.downloads.external
+        guard !mine.isEmpty || !others.isEmpty else { return nil }
+        let remaining = mine.reduce(0.0) { $0 + Double($1.totalBytes) * (1 - $1.progress) }
+            + others.reduce(0.0) { $0 + Double($1.total) * (1 - $1.progress) }
+        let speed = mine.reduce(0.0) { $0 + $1.speed } + others.reduce(0.0) { $0 + $1.speed }
+        var text = "\(Int64(remaining).fileSize) restants"
+        if speed > 0 { text += " · \(Int64(speed).fileSize)/s · fin dans \(formatDuration(remaining / speed))" }
+        return text
     }
 }
 
@@ -70,7 +91,10 @@ struct DownloadRow: View {
 
     private var stateText: String {
         switch job.state {
-        case .queued: return job.retryReason.map { "Échec (\($0)) : nouvel essai \(job.attempt)/\(DownloadJob.maxAttempts)…" } ?? "En attente"
+        case .queued:
+            guard let reason = job.retryReason else { return "En attente" }
+            return reason.hasPrefix("connexion perdue") ? "Connexion perdue : reprise dès le retour du réseau"
+                                                        : "Échec (\(reason)) : nouvel essai \(job.attempt)/\(DownloadJob.maxAttempts)…"
         case .running: return "\(Int(job.progress * 100)) %" + (job.attempt > 1 ? " · essai \(job.attempt)/\(DownloadJob.maxAttempts)" : "")
         case .verifying: return "Vérification SHA-1…"
         case .done: return "Terminé"

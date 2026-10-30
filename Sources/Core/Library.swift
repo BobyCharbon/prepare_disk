@@ -333,6 +333,16 @@ final class Library {
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 
+    /// Supprime définitivement (anciennes versions : rien ne s'accumule dans la corbeille d'un Mac qu'on ne touche pas).
+    /// Ce qu'on ne peut pas supprimer soi-même (installateur appartenant au système) va à la corbeille.
+    func delete(_ paths: [String]) async {
+        for path in paths {
+            let removed = await Task.detached { (try? FileManager.default.removeItem(atPath: path)) != nil }.value
+            if !removed { _ = try? await NSWorkspace.shared.recycle([URL(fileURLWithPath: path)]) }
+        }
+        await scan()
+    }
+
     /// Met à la corbeille (macOS demande le mot de passe si besoin).
     func trash(_ paths: [String]) async {
         let urls = paths.map { URL(fileURLWithPath: $0) }

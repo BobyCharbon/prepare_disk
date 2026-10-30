@@ -76,7 +76,7 @@ struct VersionsView: View {
                 } content: { EmptyView() }
 
                 summary(items)
-                Toggle("Mettre les anciennes versions à la corbeille dès que les nouvelles sont téléchargées",
+                Toggle("Supprimer définitivement les anciennes versions dès que les nouvelles sont téléchargées et vérifiées",
                        isOn: $model.settings.removeOldVersions)
                     .font(.callout)
             }
@@ -119,7 +119,7 @@ struct VersionsView: View {
             HStack {
                 Banner(text: "Anciennes versions encore sur ce Mac : " + old.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ") + ".",
                        color: .secondary, icon: "clock.arrow.circlepath")
-                Button("Mettre à la corbeille") { Task { await model.library.trash(old) } }
+                Button("Supprimer définitivement", role: .destructive) { Task { await model.library.delete(old) } }
             }
         }
         if missing.isEmpty && misplaced.isEmpty && verifying.isEmpty && corrupted.isEmpty {

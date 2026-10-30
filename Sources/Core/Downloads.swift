@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Network
 import Observation
 
 /// Un téléchargement de la file d'attente.
@@ -27,6 +28,10 @@ final class DownloadJob: Identifiable {
     static let maxAttempts = 3
     /// Raison du dernier échec, affichée pendant l'attente du nouvel essai.
     var retryReason: String?
+    /// Le dernier échec vient d'une coupure réseau : on attend le retour de la connexion, sans compter d'essai.
+    var networkLost = false
+    /// Dernière mesure (date, octets reçus) pour calculer la vitesse actuelle.
+    var sample: (date: Date, bytes: Double)?
 
     var cancel: (() -> Void)?
 
@@ -55,6 +60,30 @@ final class DownloadJob: Identifiable {
         case let .macOS(i): return "macos-" + i.version
         case let .ipsw(f, d): return "ipsw-" + f.id + d
         }
+    }
+}
+
+/// Suit la connexion réseau (Wi-Fi coupé, câble débranché…).
+final class NetworkWatcher: @unchecked Sendable {
+    private let monitor = NWPathMonitor()
+    private let lock = NSLock()
+    private var online = true
+
+    init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.lock.lock(); self?.online = path.status == .satisfied; self?.lock.unlock()
+        }
+        monitor.start(queue: DispatchQueue(label: "reseau"))
+    }
+
+    var isOnline: Bool { lock.lock(); defer { lock.unlock() }; return online }
+
+    /// Erreurs dues à la connexion (et non au fichier ou au serveur).
+    static func isConnectionError(_ error: Error) -> Bool {
+        let codes: [URLError.Code] = [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost,
+                                      .cannotConnectToHost, .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff,
+                                      .secureConnectionFailed, .cannotLoadFromNetwork]
+        return (error as? URLError).map { codes.contains($0.code) } ?? false
     }
 }
 
@@ -224,11 +253,25 @@ final class DownloadManager {
         while true {
             job.state = .running
             job.startedAt = Date()
+            job.sample = nil
+            job.speed = 0
             switch job.kind {
             case let .macOS(installer): await runMacOS(job, installer)
             case let .ipsw(firmware, destination): await runIPSW(job, firmware, destination)
             }
-            // Échec : on recommence (après une pause, la connexion revient souvent), sauf au dernier essai.
+            // Coupure réseau : ce n'est pas un échec. On attend que la connexion revienne, puis on reprend
+            // où on en était (fichier partiel), aussi longtemps qu'il faut.
+            if case .failed = job.state, job.networkLost {
+                job.networkLost = false
+                job.retryReason = "connexion perdue : reprise dès le retour du réseau"
+                job.speed = 0
+                job.state = .queued
+                while !network.isOnline && job.state != .cancelled { try? await Task.sleep(for: .seconds(2)) }
+                if job.state == .cancelled { return }
+                try? await Task.sleep(for: .seconds(3))   // laisse la connexion se stabiliser
+                continue
+            }
+            // Vraie erreur : on recommence (après une pause), sauf au dernier essai.
             guard case let .failed(reason) = job.state, job.attempt < DownloadJob.maxAttempts else { break }
             job.attempt += 1
             job.retryReason = reason
@@ -247,11 +290,31 @@ final class DownloadManager {
         }
     }
 
+    /// État du réseau, suivi en continu.
+    private let network = NetworkWatcher()
+
+    /// Échec d'un téléchargement : coupure réseau (on attendra) ou vraie erreur (comptée).
+    private func fail(_ job: DownloadJob, _ error: Error) {
+        job.networkLost = NetworkWatcher.isConnectionError(error) || !network.isOnline
+        job.state = .failed(error.localizedDescription)
+    }
+
     private func update(_ job: DownloadJob, progress: Double) {
-        guard progress > job.progress, let start = job.startedAt else { return }
-        let elapsed = Date().timeIntervalSince(start)
+        guard progress > job.progress else { return }
         job.progress = min(progress, 1)
-        if elapsed > 2 { job.speed = Double(job.totalBytes) * job.progress / elapsed }
+        // Vitesse actuelle : octets reçus depuis la dernière mesure, lissée sur quelques secondes. (Une moyenne
+        // depuis le début se trompe après une reprise et quand les téléchargements se partagent la connexion.)
+        let bytes = Double(job.totalBytes) * job.progress, now = Date()
+        if let sample = job.sample {
+            let elapsed = now.timeIntervalSince(sample.date)
+            if elapsed >= 1 {
+                let current = max(0, (bytes - sample.bytes) / elapsed)
+                job.speed = job.speed == 0 ? current : job.speed * 0.85 + current * 0.15
+                job.sample = (now, bytes)
+            }
+        } else {
+            job.sample = (now, bytes)
+        }
         // Progression globale de tous les téléchargements en cours, dans le Dock.
         let running = jobs.filter { $0.state == .running }
         let total = running.reduce(0) { $0 + Double($1.totalBytes) }
@@ -316,7 +379,7 @@ final class DownloadManager {
         }
         job.cancel = nil
         if job.state == .cancelled { return }
-        if case let .failure(error) = result { job.state = .failed(error.localizedDescription); return }
+        if case let .failure(error) = result { fail(job, error); return }
         keepForResume = false   // téléchargé : quoi qu'il arrive ensuite, on ne réutilisera pas ce dossier
 
         // Certification : paquet signé par Apple (sa table des matières, signée, contient l'empreinte de chaque
@@ -390,7 +453,7 @@ final class DownloadManager {
         if job.state == .cancelled { return }
         switch result {
         case let .failure(error):
-            job.state = .failed(error.localizedDescription)
+            fail(job, error)
         case let .success(temp):
             // Certification obligatoire : l'empreinte SHA-1 doit être celle publiée pour ce firmware.
             job.state = .verifying

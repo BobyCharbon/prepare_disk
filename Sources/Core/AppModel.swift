@@ -133,7 +133,9 @@ final class AppModel {
         // macOS : installateurs du dossier Intel qui ne sont plus choisis.
         let chosen = settings.selected.filter { !$0.isEmpty }
         let intel = library.installers.filter { $0.path.hasPrefix(settings.intelFolder + "/") }
-        if !chosen.isEmpty, chosen.allSatisfy({ v in intel.contains { $0.version == v } }) {
+        // Suppression définitive : seulement si chaque remplaçante est certifiée intacte.
+        let certified = { (path: String) in self.library.certification(path) == .certified }
+        if !chosen.isEmpty, chosen.allSatisfy({ v in intel.contains { $0.version == v && certified($0.path) } }) {
             old += intel.filter { !chosen.contains($0.version ?? "") }.map(\.path)
         }
         // IPSW Mac : ceux du dossier Silicon qui ne correspondent à aucun macOS coché.
@@ -144,7 +146,7 @@ final class AppModel {
                                            pinned: settings.macIPSWVersions[slot])
             }
             let silicon = library.macIPSWs.filter { $0.path.hasPrefix(settings.siliconFolder + "/") }
-            if !wanted.isEmpty, wanted.allSatisfy({ fw in silicon.contains { $0.matches(fw) } }) {
+            if !wanted.isEmpty, wanted.allSatisfy({ fw in silicon.contains { $0.matches(fw) && certified($0.path) } }) {
                 old += silicon.filter { file in !wanted.contains { file.matches($0) } }.map(\.path)
             }
         }
@@ -153,7 +155,7 @@ final class AppModel {
             for device in settings.enabledDevices {
                 guard let fw = catalog.iPadFirmware(device) else { continue }
                 let files = (library.iPadIPSWs[device.name] ?? []).filter { $0.path.hasPrefix(settings.folder(for: device) + "/") }
-                if files.contains(where: { $0.matches(fw) }) {
+                if files.contains(where: { $0.matches(fw) && certified($0.path) }) {
                     old += files.filter { !$0.matches(fw) }.map(\.path)
                 }
             }
@@ -161,14 +163,14 @@ final class AppModel {
         return old
     }
 
-    /// Met les anciennes versions à la corbeille (récupérables), si le réglage est activé.
+    /// Supprime définitivement les anciennes versions remplacées, si le réglage est activé.
     func removeOldVersions() async {
         guard settings.removeOldVersions, !preparer.isRunning else { return }
         let old = obsoleteFiles()
         guard !old.isEmpty else { return }
         let names = old.map { ($0 as NSString).lastPathComponent }
-        await library.trash(old)
-        log.add("Anciennes versions mises à la corbeille : " + names.joined(separator: ", "))
+        await library.delete(old)
+        log.add("Anciennes versions supprimées : " + names.joined(separator: ", "))
         notifier.notify("Anciennes versions supprimées", names.joined(separator: "\n"))
     }
 

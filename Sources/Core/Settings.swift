@@ -55,7 +55,7 @@ final class AppSettings {
     var notificationsEnabled: Bool = true { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
     var verifyChecksums: Bool = true { didSet { defaults.set(verifyChecksums, forKey: "verifyChecksums") } }
     var removeOldOnUpdate: Bool = true { didSet { defaults.set(removeOldOnUpdate, forKey: "removeOldOnUpdate") } }
-    /// Après un téléchargement, met à la corbeille les anciennes versions remplacées dans ~/prepare_disk.
+    /// Après un téléchargement, supprime définitivement les anciennes versions remplacées dans ~/prepare_disk.
     var removeOldVersions: Bool = true { didSet { defaults.set(removeOldVersions, forKey: "removeOldVersions") } }
     /// Télécharge tout seul les versions validées (Mac de production).
     var autoDownload: Bool = false { didSet { defaults.set(autoDownload, forKey: "autoDownload") } }
