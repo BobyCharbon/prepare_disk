@@ -3,6 +3,18 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.0 — 30 octobre 2026
+
+- L'app s'ouvre sur Versions validées ; tout réglage manquant (accès complet au disque, configuration unique, arrière-plan, notifications) s'affiche en rouge tout en haut, avec un bouton qui y mène, et disparaît une fois réglé.
+- L'icône de la barre des menus s'installe d'office avec l'app.
+- Téléchargements : reprise là où ils en étaient après une coupure (Wi-Fi, app quittée, redémarrage), attente du retour du réseau au lieu d'échouer, temps restant plus juste et total en haut de la page.
+- Chaque fichier est certifié intact avant d'être marqué « Sur ce Mac » (empreinte SHA-1 des IPSW, signature Apple et version des macOS) ; un fichier abîmé est retéléchargé.
+- Les téléchargements de l'icône sont visibles et annulables dans l'app, et l'icône montre ceux de l'app.
+- Les anciennes versions sont supprimées définitivement, seulement une fois leur remplaçante certifiée.
+- Espace disque libre et nécessaire affiché dans Versions validées et dans l'icône.
+- Mise à jour obligatoire : installée seule, même sans droits administrateur ; l'app est bloquée tant qu'elle n'est pas faite.
+- La configuration unique ne sera plus jamais à refaire : l'assistant se met à jour tout seul (dernière fois pour cette version).
+
 ## 1.4.0 — 30 octobre 2026
 
 - App signée par un développeur Apple et notarisée : elle s'ouvre directement, sans avertissement ni passage par les Réglages.
