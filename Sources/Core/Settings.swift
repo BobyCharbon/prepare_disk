@@ -27,59 +27,66 @@ final class AppSettings {
     private let defaults = UserDefaults.standard
 
     /// Les 3 versions macOS choisies ("" = emplacement vide).
-    var selected: [String] {
+    var selected: [String] = ["", "", ""] {
         didSet {
             defaults.set(selected, forKey: "selectedVersions")
             clearStalePins()
         }
     }
     /// Taille minimale d'une partition macOS (agrandie si l'installateur est plus gros).
-    var partitionSizeGB: Int { didSet { defaults.set(partitionSizeGB, forKey: "partitionSizeGB") } }
+    var partitionSizeGB: Int = 20 { didSet { defaults.set(partitionSizeGB, forKey: "partitionSizeGB") } }
     /// Dossier prepare_disk : OS/MacOS/Intel, OS/MacOS/Silicon, OS/iOS, Others.
-    var dataFolder: String { didSet { defaults.set(dataFolder, forKey: "dataFolder") } }
+    var dataFolder: String = "" { didSet { defaults.set(dataFolder, forKey: "dataFolder") } }
 
     // Contenu de DataExternalDrive
-    var includeMacIPSW: Bool { didSet { defaults.set(includeMacIPSW, forKey: "includeMacIPSW") } }
+    var includeMacIPSW: Bool = true { didSet { defaults.set(includeMacIPSW, forKey: "includeMacIPSW") } }
     /// Pour quels emplacements macOS on copie aussi l'IPSW Apple Silicon.
-    var macIPSWSlots: [Bool] { didSet { defaults.set(macIPSWSlots, forKey: "macIPSWSlots") } }
+    var macIPSWSlots: [Bool] = [true, true, false] { didSet { defaults.set(macIPSWSlots, forKey: "macIPSWSlots") } }
     /// Version IPSW Apple Silicon choisie par emplacement ("" = automatique, celle du macOS).
-    var macIPSWVersions: [String] { didSet { defaults.set(macIPSWVersions, forKey: "macIPSWVersions") } }
-    var macIdentifier: String { didSet { defaults.set(macIdentifier, forKey: "macIdentifier") } }
-    var macIPSWPrefix: String { didSet { defaults.set(macIPSWPrefix, forKey: "macIPSWPrefix") } }
-    var includeIPadIPSW: Bool { didSet { defaults.set(includeIPadIPSW, forKey: "includeIPadIPSW") } }
-    var devices: [Device] { didSet { defaults.set(try? JSONEncoder().encode(devices), forKey: "devices") } }
-    var includeLoops: Bool { didSet { defaults.set(includeLoops, forKey: "includeLoops") } }
+    var macIPSWVersions: [String] = ["", "", ""] { didSet { defaults.set(macIPSWVersions, forKey: "macIPSWVersions") } }
+    var macIdentifier: String = "" { didSet { defaults.set(macIdentifier, forKey: "macIdentifier") } }
+    var macIPSWPrefix: String = "" { didSet { defaults.set(macIPSWPrefix, forKey: "macIPSWPrefix") } }
+    var includeIPadIPSW: Bool = true { didSet { defaults.set(includeIPadIPSW, forKey: "includeIPadIPSW") } }
+    var devices: [Device] = [] { didSet { defaults.set(try? JSONEncoder().encode(devices), forKey: "devices") } }
+    var includeLoops: Bool = false { didSet { defaults.set(includeLoops, forKey: "includeLoops") } }
 
     // Général
-    var checkUpdatesAtLaunch: Bool { didSet { defaults.set(checkUpdatesAtLaunch, forKey: "checkUpdatesAtLaunch") } }
-    var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
-    var verifyChecksums: Bool { didSet { defaults.set(verifyChecksums, forKey: "verifyChecksums") } }
-    var removeOldOnUpdate: Bool { didSet { defaults.set(removeOldOnUpdate, forKey: "removeOldOnUpdate") } }
+    var checkUpdatesAtLaunch: Bool = true { didSet { defaults.set(checkUpdatesAtLaunch, forKey: "checkUpdatesAtLaunch") } }
+    var notificationsEnabled: Bool = true { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
+    var verifyChecksums: Bool = true { didSet { defaults.set(verifyChecksums, forKey: "verifyChecksums") } }
+    var removeOldOnUpdate: Bool = true { didSet { defaults.set(removeOldOnUpdate, forKey: "removeOldOnUpdate") } }
     /// Après un téléchargement, met à la corbeille les anciennes versions remplacées dans ~/prepare_disk.
-    var removeOldVersions: Bool { didSet { defaults.set(removeOldVersions, forKey: "removeOldVersions") } }
+    var removeOldVersions: Bool = true { didSet { defaults.set(removeOldVersions, forKey: "removeOldVersions") } }
     /// Télécharge tout seul les versions validées (Mac de production).
-    var autoDownload: Bool { didSet { defaults.set(autoDownload, forKey: "autoDownload") } }
+    var autoDownload: Bool = false { didSet { defaults.set(autoDownload, forKey: "autoDownload") } }
 
-    init() {
+    init() { reload() }
+
+    /// Relit les préférences (l'agent d'arrière-plan suit ainsi les changements faits dans l'app).
+    func reload() {
         let d = UserDefaults.standard
         func bool(_ key: String, _ fallback: Bool) -> Bool { d.object(forKey: key) as? Bool ?? fallback }
-        selected = Array(((d.stringArray(forKey: "selectedVersions") ?? []) + ["", "", ""]).prefix(3))
-        partitionSizeGB = d.object(forKey: "partitionSizeGB") as? Int ?? 20
-        dataFolder = d.string(forKey: "dataFolder") ?? NSHomeDirectory() + "/prepare_disk"
-        includeMacIPSW = bool("includeMacIPSW", true)
-        macIPSWSlots = Array(((d.array(forKey: "macIPSWSlots") as? [Bool]) ?? [true, true, false]).prefix(3))
-        macIPSWVersions = Array(((d.stringArray(forKey: "macIPSWVersions") ?? []) + ["", "", ""]).prefix(3))
-        macIdentifier = d.string(forKey: "macIdentifier") ?? "MacBookAir10,1"
-        macIPSWPrefix = d.string(forKey: "macIPSWPrefix") ?? "MacBook Air SILICON"
-        includeIPadIPSW = bool("includeIPadIPSW", true)
-        devices = (d.data(forKey: "devices")).flatMap { try? JSONDecoder().decode([Device].self, from: $0) } ?? Device.defaults
-        includeLoops = bool("includeLoops", false)
-        checkUpdatesAtLaunch = bool("checkUpdatesAtLaunch", true)
-        notificationsEnabled = bool("notificationsEnabled", true)
-        verifyChecksums = bool("verifyChecksums", true)
-        removeOldOnUpdate = bool("removeOldOnUpdate", true)
-        removeOldVersions = bool("removeOldVersions", true)
-        autoDownload = bool("autoDownload", false)
+        // N'écrit que ce qui a changé (chaque écriture est enregistrée dans les préférences).
+        func set<T: Equatable>(_ key: ReferenceWritableKeyPath<AppSettings, T>, _ value: T) {
+            if self[keyPath: key] != value { self[keyPath: key] = value }
+        }
+        set(\.partitionSizeGB, d.object(forKey: "partitionSizeGB") as? Int ?? 20)
+        set(\.dataFolder, d.string(forKey: "dataFolder") ?? NSHomeDirectory() + "/prepare_disk")
+        set(\.includeMacIPSW, bool("includeMacIPSW", true))
+        set(\.macIPSWSlots, Array(((d.array(forKey: "macIPSWSlots") as? [Bool]) ?? [true, true, false]).prefix(3)))
+        set(\.macIPSWVersions, Array(((d.stringArray(forKey: "macIPSWVersions") ?? []) + ["", "", ""]).prefix(3)))
+        set(\.selected, Array(((d.stringArray(forKey: "selectedVersions") ?? []) + ["", "", ""]).prefix(3)))
+        set(\.macIdentifier, d.string(forKey: "macIdentifier") ?? "MacBookAir10,1")
+        set(\.macIPSWPrefix, d.string(forKey: "macIPSWPrefix") ?? "MacBook Air SILICON")
+        set(\.includeIPadIPSW, bool("includeIPadIPSW", true))
+        set(\.devices, (d.data(forKey: "devices")).flatMap { try? JSONDecoder().decode([Device].self, from: $0) } ?? Device.defaults)
+        set(\.includeLoops, bool("includeLoops", false))
+        set(\.checkUpdatesAtLaunch, bool("checkUpdatesAtLaunch", true))
+        set(\.notificationsEnabled, bool("notificationsEnabled", true))
+        set(\.verifyChecksums, bool("verifyChecksums", true))
+        set(\.removeOldOnUpdate, bool("removeOldOnUpdate", true))
+        set(\.removeOldVersions, bool("removeOldVersions", true))
+        set(\.autoDownload, bool("autoDownload", false))
         clearStalePins()
     }
 

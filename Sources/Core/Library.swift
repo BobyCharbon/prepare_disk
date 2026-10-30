@@ -234,6 +234,13 @@ final class Library {
         for folder in folders where !fm.fileExists(atPath: folder) {
             try? fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
         }
+        // Restes d'un téléchargement interrompu (app quittée, plantage) : plus vieux de 12 h, on les supprime.
+        for folder in folders {
+            for name in (try? fm.contentsOfDirectory(atPath: folder)) ?? [] where name.hasPrefix(".") && (name.hasSuffix(".work") || name.hasSuffix(".part")) {
+                let path = folder + "/" + name
+                if Date().timeIntervalSince(modificationDate(path)) > 12 * 3600 { try? fm.removeItem(atPath: path) }
+            }
+        }
     }
 
     private func apps(in folder: String) -> [String] {

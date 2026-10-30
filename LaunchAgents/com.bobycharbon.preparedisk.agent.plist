@@ -6,9 +6,10 @@
     <key>BundleProgram</key><string>Contents/MacOS/PrepareDisk</string>
     <key>ProgramArguments</key>
     <array><string>PrepareDisk</string><string>--agent</string></array>
-    <!-- À l'ouverture de session, puis toutes les 15 minutes (jamais deux à la fois). -->
+    <!-- Icône dans la barre des menus : lancée à l'ouverture de session et relancée si elle s'arrête. -->
     <key>RunAtLoad</key><true/>
-    <key>StartInterval</key><integer>900</integer>
-    <key>ProcessType</key><string>Standard</string>
+    <key>KeepAlive</key><true/>
+    <key>LimitLoadToSessionType</key><string>Aqua</string>
+    <key>ProcessType</key><string>Interactive</string>
 </dict>
 </plist>

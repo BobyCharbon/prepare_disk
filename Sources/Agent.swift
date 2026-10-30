@@ -1,67 +1,205 @@
 import AppKit
-import Foundation
+import SwiftUI
 
-/// Point d'entrée : l'app normale, ou l'agent invisible lancé par macOS (« --agent ») quand l'app est fermée.
+/// Point d'entrée : l'app normale, ou l'agent (« --agent ») lancé par macOS à l'ouverture de session.
 @main
 enum Launcher {
     static func main() {
-        if CommandLine.arguments.contains("--agent") {
-            NSApplication.shared.setActivationPolicy(.prohibited)   // ni fenêtre ni icône dans le Dock
-            Task { @MainActor in
-                await Agent.run()
-                exit(0)
-            }
-            dispatchMain()
-        } else {
-            PrepareDiskApp.main()
-        }
+        if CommandLine.arguments.contains("--agent") { AgentApp.main() } else { PrepareDiskApp.main() }
     }
 }
 
-/// Un passage de l'agent : mise à jour de l'app, versions validées, téléchargements, rangement. Puis il s'arrête
-/// (macOS le relance 15 minutes plus tard).
+/// L'agent : une icône dans la barre des menus, toujours là (même app fermée), qui montre si les versions validées
+/// sont sur ce Mac et les télécharge toutes seules si le téléchargement automatique est activé.
+struct AgentApp: App {
+    @NSApplicationDelegateAdaptor private var delegate: AgentDelegate
+    @State private var agent = AgentModel()
+
+    var body: some Scene {
+        MenuBarExtra {
+            AgentPanel(agent: agent)
+        } label: {
+            Image(systemName: agent.symbol)
+        }
+        .menuBarExtraStyle(.window)
+    }
+}
+
+final class AgentDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)   // pas d'icône dans le Dock
+    }
+
+    /// Double-clic sur l'app pendant que l'agent tourne : macOS s'adresse à l'agent, qui ouvre la vraie fenêtre.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        Agent.openApp()
+        return false
+    }
+}
+
 @MainActor
 enum Agent {
-    static let label = "com.bobycharbon.preparedisk.agent"
-    static let plist = label + ".plist"
+    static let plist = "com.bobycharbon.preparedisk.agent.plist"
     private static let lock = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/PrepareDisk/agent.pid")
 
-    /// L'agent est en train de travailler (l'app ouverte lui laisse alors les téléchargements).
-    static var isRunning: Bool {
+    /// L'agent est en train de télécharger : l'app ouverte lui laisse alors les téléchargements.
+    static var isDownloading: Bool {
         guard let text = try? String(contentsOf: lock, encoding: .utf8), let pid = Int32(text) else { return false }
         return pid != getpid() && kill(pid, 0) == 0
     }
 
-    static func run() async {
-        // L'app est ouverte : c'est elle qui s'en occupe.
-        let me = getpid()
-        if NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
-            .contains(where: { $0.processIdentifier != me && $0.activationPolicy == .regular }) { return }
-        try? FileManager.default.createDirectory(at: lock.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? String(me).write(to: lock, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: lock) }
+    static func setDownloading(_ on: Bool) {
+        if on {
+            try? FileManager.default.createDirectory(at: lock.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? String(getpid()).write(to: lock, atomically: true, encoding: .utf8)
+        } else {
+            try? FileManager.default.removeItem(at: lock)
+        }
+    }
 
-        Shell.interactive = false   // personne pour taper un mot de passe : l'assistant système ou rien
-        let model = AppModel()
-        guard model.settings.autoDownload else { return }
-        model.log.add("==> Agent : vérification en arrière-plan")
+    /// La fenêtre de Prepare Disk est ouverte (un autre processus du même programme, avec une icône dans le Dock).
+    static var appIsOpen: Bool {
+        NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .contains { $0.processIdentifier != getpid() && $0.activationPolicy == .regular }
+    }
 
-        // 1. L'app elle-même (remplacée sans être relancée : la prochaine ouverture sera la nouvelle version).
-        await model.updater.check(silently: true)
-        if model.updater.state == .available { await model.updater.install(relaunch: false) }
+    static func openApp() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = !appIsOpen   // l'agent est déjà une « instance » de l'app
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
+    }
+}
 
-        // 2. Versions validées, catalogue Apple, fichiers présents.
+/// Le travail de l'agent : relit les fichiers chaque minute, les versions validées toutes les 5 minutes,
+/// et télécharge ce qui manque quand le téléchargement automatique est activé et que l'app est fermée.
+@MainActor
+@Observable
+final class AgentModel {
+    let model: AppModel
+    var items: [AppModel.Needed] = []
+    var lastCheck: Date?
+    private let loadedVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+
+    init() {
+        Shell.interactive = false   // jamais de fenêtre de mot de passe : l'assistant système ou rien
+        model = AppModel()
+        Task { await loop() }
+    }
+
+    var downloading: [DownloadJob] { model.downloads.active }
+    var missing: Int { items.filter { $0.state != .ok }.count }
+    var symbol: String {
+        if !downloading.isEmpty { return "arrow.down.circle" }
+        if items.isEmpty { return "externaldrive" }
+        return missing == 0 ? "externaldrive.badge.checkmark" : "externaldrive.badge.exclamationmark"
+    }
+
+    private func loop() async {
+        var lastValidated = Date.distantPast, lastApple = Date.distantPast, lastUpdate = Date.distantPast
         await model.helper.check()
-        await model.syncValidated(notify: true)
-        await model.catalog.loadInstallers()
-        await model.refreshFirmwares()
-        await model.library.scan()
+        while true {
+            // L'app a été mise à jour sur le disque : on redémarre (macOS relance l'agent avec la nouvelle version).
+            let info = NSDictionary(contentsOfFile: Bundle.main.bundlePath + "/Contents/Info.plist")
+            if let onDisk = info?["CFBundleShortVersionString"] as? String, onDisk != loadedVersion { exit(0) }
 
-        // 3. Tout ce qui manque, en attendant la fin (les échecs sont retentés au passage suivant).
-        model.autoDownloadTick()
-        _ = await model.downloads.wait(for: model.downloads.jobs)
+            model.settings.reload()
+            let appOpen = Agent.appIsOpen
+            if !appOpen && model.downloads.active.isEmpty && Date().timeIntervalSince(lastUpdate) > 3600 {
+                lastUpdate = Date()
+                await model.updater.check(silently: true)
+                if model.updater.state == .available { await model.updater.install(relaunch: false); exit(0) }
+            }
+            if Date().timeIntervalSince(lastValidated) > 5 * 60 {
+                lastValidated = Date()
+                await model.syncValidated(notify: !appOpen)
+            }
+            if Date().timeIntervalSince(lastApple) > 3 * 3600 {
+                lastApple = Date()
+                await model.catalog.loadInstallers()
+                await model.refreshFirmwares()
+            }
+            await check(download: !appOpen)
+            try? await Task.sleep(for: .seconds(60))
+        }
+    }
+
+    /// Relit les fichiers et, si permis, lance les téléchargements manquants.
+    func check(download: Bool) async {
         await model.library.scan()
-        await model.removeOldVersions()
-        model.log.add("Agent : terminé")
+        items = model.validatedChecklist()
+        lastCheck = Date()
+        if download { model.autoDownloadTick() }
+        Agent.setDownloading(!model.downloads.active.isEmpty)
+    }
+
+    func downloadAll() {
+        for kind in items.compactMap(\.download) { model.downloads.enqueue(kind) }
+        Agent.setDownloading(true)
+    }
+}
+
+/// Le panneau qui s'ouvre en cliquant sur l'icône.
+struct AgentPanel: View {
+    @Bindable var agent: AgentModel
+
+    var body: some View {
+        let model = agent.model
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: agent.symbol).font(.title2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Prepare Disk").font(.headline)
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Divider()
+            if agent.items.isEmpty {
+                Text("Lecture en cours…").foregroundStyle(.secondary)
+            }
+            ForEach(agent.items) { item in
+                HStack {
+                    row(item)
+                    Text(item.label)
+                    Spacer()
+                }
+                .font(.callout)
+            }
+            Divider()
+            Label(model.settings.autoDownload ? "Téléchargement automatique activé" : "Téléchargement automatique désactivé",
+                  systemImage: model.settings.autoDownload ? "arrow.triangle.2.circlepath" : "pause.circle")
+                .font(.caption).foregroundStyle(.secondary)
+            if let date = agent.lastCheck {
+                Text("Vérifié \(date.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.tertiary)
+            }
+            HStack {
+                Button("Ouvrir Prepare Disk") { Agent.openApp() }
+                Spacer()
+                if agent.items.contains(where: { $0.download != nil }) && agent.downloading.isEmpty {
+                    Button("Tout télécharger") { agent.downloadAll() }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 320)
+    }
+
+    private var summary: String {
+        if !agent.downloading.isEmpty { return "\(agent.downloading.count) téléchargement(s) en cours" }
+        if agent.items.isEmpty { return "Vérification…" }
+        return agent.missing == 0 ? "Toutes les versions validées sont sur ce Mac"
+                                  : "\(agent.missing) version(s) validée(s) manquante(s)"
+    }
+
+    @ViewBuilder
+    private func row(_ item: AppModel.Needed) -> some View {
+        if let kind = item.download, let job = agent.downloading.first(where: { $0.key == DownloadJob(kind: kind).key }) {
+            ProgressView(value: job.progress).progressViewStyle(.circular).controlSize(.mini)
+        } else {
+            switch item.state {
+            case .ok: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            case .misplaced: Image(systemName: "tray.and.arrow.down.fill").foregroundStyle(.orange)
+            case .missing: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            }
+        }
     }
 }

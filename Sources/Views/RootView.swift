@@ -7,9 +7,8 @@ struct RootView: View {
         NavigationSplitView {
             List(selection: $model.page) {
                 Section("Versions") { row(.versions) }
-                Section("Préparation") { row(.prepare) }
+                Section("Préparation des disques bootables") { row(.prepare); row(.disks) }
                 Section("Contenu") { row(.library); row(.ipsw) }
-                Section("Matériel") { row(.disks) }
                 Section("Suivi") { row(.downloads); row(.history); row(.log) }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
@@ -49,7 +48,6 @@ struct RootView: View {
         switch page {
         case .downloads: return model.downloads.active.count
         case .disks: return model.disks.disks.count
-        case .versions: return model.updateNotices.count
         case .library: return model.library.suggestions.filter(\.isInstaller).count
         case .ipsw: return model.library.suggestions.filter { !$0.isInstaller }.count
         default: return 0

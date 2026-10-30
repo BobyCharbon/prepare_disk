@@ -31,7 +31,6 @@ struct VersionsView: View {
                 }
                 ValidatedBanner(model: model)
                 HelperBanner(model: model)
-                ForEach(model.updateNotices, id: \.self) { Banner(text: $0, color: .blue, icon: "sparkles") }
                 ForEach(model.preparer.plan().blocked, id: \.self) { Banner(text: $0, color: .red, icon: "nosign") }
 
                 Card(title: "macOS", icon: "apple.logo", subtitle: "Une partition bootable par version") {
@@ -97,6 +96,9 @@ struct VersionsView: View {
             VersionPicker(model: model, slot: slot).frame(width: 260)
             Spacer()
             if !version.isEmpty {
+                if model.validated.published?.macOS.contains(version) == true {
+                    Pill(text: "Validée", color: .validated, icon: "checkmark.seal.fill")
+                }
                 LatestPill(chosen: version, latest: latest?.version)
                 if let local = model.library.installer(for: version, build: model.catalog.installer(version: version)?.build) {
                     local.path.hasPrefix(model.settings.intelFolder + "/")
@@ -125,7 +127,7 @@ struct VersionsView: View {
         }
         if missing.isEmpty && misplaced.isEmpty {
             Banner(text: "Toutes les versions validées sont sur ce Mac et rangées au bon endroit (\(items.count) éléments).",
-                   color: .green, icon: "checkmark.circle.fill")
+                   color: .validated, icon: "checkmark.seal.fill")
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 if downloading > 0 {
@@ -168,8 +170,9 @@ private struct ValidatedBanner: View {
         let store = model.validated
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: store.isAdmin ? "person.badge.key.fill" : "lock.fill")
-                    .foregroundStyle(store.isAdmin ? Color.orange : Color.blue)
+                Image(systemName: store.isAdmin ? "person.badge.key.fill" : "checkmark.seal.fill")
+                    .font(.title2)
+                    .foregroundStyle(store.isAdmin ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.validatedGradient))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(store.isAdmin ? "Mode administrateur" : "Versions validées par l'administrateur").fontWeight(.semibold)
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
@@ -209,7 +212,8 @@ private struct ValidatedBanner: View {
             if let error = store.error { Text(error).font(.caption).foregroundStyle(.orange) }
         }
         .padding(12)
-        .background((store.isAdmin ? Color.orange : Color.blue).opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .background(store.isAdmin ? AnyShapeStyle(Color.orange.opacity(0.08)) : AnyShapeStyle(LinearGradient.validatedGradient.opacity(0.14)),
+                    in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var subtitle: String {

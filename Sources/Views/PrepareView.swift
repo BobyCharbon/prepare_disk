@@ -138,12 +138,6 @@ private struct VersionsStep: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Choisissez les versions de macOS à installer. Une partition bootable est créée pour chacune.")
                 .foregroundStyle(.secondary)
-            if !model.updateNotices.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(model.updateNotices, id: \.self) { Banner(text: $0, color: .blue, icon: "sparkles") }
-                    Button("Utiliser les dernières versions") { model.useLatestVersions() }
-                }
-            }
             if model.catalog.isLoadingInstallers && model.catalog.installers.isEmpty {
                 HStack { ProgressView().controlSize(.small); Text("Recherche des versions chez Apple…") }
             }
@@ -672,9 +666,9 @@ struct LatestPill: View {
 
     var body: some View {
         if let latest, latest.isNewerVersion(than: chosen) {
-            Pill(text: "\(latest) chez Apple", color: .blue, icon: "sparkles")
+            Pill(text: "\(latest) chez Apple", color: .appleLatest, icon: "sparkles")
         } else if latest != nil {
-            Pill(text: "Dernière version Apple", color: .teal, icon: "checkmark.seal")
+            Pill(text: "Dernière version Apple", color: .appleLatest, icon: "apple.logo")
         }
     }
 }

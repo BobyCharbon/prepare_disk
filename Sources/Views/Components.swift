@@ -282,3 +282,19 @@ struct HelperBanner: View {
         }
     }
 }
+
+extension Color {
+    /// Dernières versions proposées par Apple : rose.
+    static let appleLatest = Color(red: 0.96, green: 0.33, blue: 0.62)
+    /// Versions validées : couleur du logo de l'entreprise (milieu du dégradé vert → bleu).
+    static let validated = Color(red: 0.29, green: 0.52, blue: 0.60)
+    static let validatedGreen = Color(red: 0.25, green: 0.57, blue: 0.41)
+    static let validatedBlue = Color(red: 0.31, green: 0.45, blue: 0.71)
+}
+
+extension ShapeStyle where Self == LinearGradient {
+    /// Le dégradé du logo, pour les éléments « versions validées ».
+    static var validatedGradient: LinearGradient {
+        LinearGradient(colors: [.validatedGreen, .validatedBlue], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+}

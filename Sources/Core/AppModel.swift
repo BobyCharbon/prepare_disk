@@ -38,6 +38,7 @@ final class AppModel {
         library.helper = helper
         notifier = Notifier(settings: settings)
         downloads = DownloadManager(settings: settings, library: library, notifier: notifier)
+        downloads.catalog = catalog
         disks = DiskStore(settings: settings, catalog: catalog, library: library)
         preparer = Preparer(settings: settings, catalog: catalog, library: library, downloads: downloads,
                             disks: disks, history: history, log: log, notifier: notifier)
@@ -258,8 +259,11 @@ final class AppModel {
 
     // MARK: Téléchargement automatique
 
-    /// Dernier lancement automatique de chaque téléchargement (pour ne pas relancer en boucle un échec).
-    private var autoAttempts: [String: Date] = [:]
+    /// Dernier lancement automatique de chaque téléchargement et nombre d'échecs d'affilée
+    /// (pour ne jamais relancer en boucle un téléchargement qui échoue).
+    private var autoAttempts: [String: (date: Date, failures: Int)] = [:]
+    /// Attente avant de relancer après 1, 2, 3… échecs : 5 min, 30 min, 2 h, puis 6 h.
+    private static let backoff: [TimeInterval] = [5 * 60, 30 * 60, 2 * 3600, 6 * 3600]
     /// Message si l'ouverture à la session demande une validation dans Réglages Système.
     var loginItemNote: String?
 
@@ -278,15 +282,24 @@ final class AppModel {
         if on { autoDownloadTick() }
     }
 
-    /// Met en téléchargement tout ce qui manque. Un échec est retenté toutes les 2 minutes, sans fin.
+    /// Met en téléchargement tout ce qui manque. Un échec est retenté de plus en plus tard, sans fin mais sans inonder.
     func autoDownloadTick() {
         // Pendant que l'agent d'arrière-plan travaille, c'est lui qui télécharge.
-        guard settings.autoDownload, !preparer.isRunning, !Agent.isRunning else { return }
+        guard settings.autoDownload, !preparer.isRunning, !Agent.isDownloading else { return }
         for kind in validatedChecklist().compactMap(\.download) {
             let key = DownloadJob(kind: kind).key
             if downloads.active.contains(where: { $0.key == key }) { continue }
-            if let last = autoAttempts[key], Date().timeIntervalSince(last) < 120 { continue }
-            autoAttempts[key] = Date()
+            var failures = autoAttempts[key]?.failures ?? 0
+            if let last = downloads.jobs.last(where: { $0.key == key }), case .failed = last.state { failures += 1 }
+            if let previous = autoAttempts[key], failures > 0 {
+                let wait = Self.backoff[min(failures, Self.backoff.count) - 1]
+                guard Date().timeIntervalSince(previous.date) >= wait else { continue }
+                if failures == 1 {
+                    notifier.notify("Téléchargement en échec", "\(DownloadJob(kind: kind).title) : nouvel essai automatique plus tard.", isError: true)
+                }
+            }
+            downloads.jobs.removeAll { $0.key == key && $0.isFinished }   // l'échec est compté, on garde la liste propre
+            autoAttempts[key] = (Date(), failures)
             downloads.enqueue(kind)
         }
     }

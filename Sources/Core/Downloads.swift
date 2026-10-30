@@ -66,6 +66,8 @@ final class DownloadManager {
     private let library: Library
     private let notifier: Notifier
     var jobs: [DownloadJob] = []
+    /// Pour trouver le paquet officiel d'un macOS dans le catalogue d'Apple.
+    weak var catalog: Catalog?
     /// Appelé quand la file est vide après au moins un téléchargement réussi (nettoyage des anciennes versions).
     var onFinished: (() async -> Void)?
     /// Téléchargements simultanés (un seul macOS à la fois : softwareupdate ne sait pas en faire deux).
@@ -183,6 +185,7 @@ final class DownloadManager {
     // MARK: macOS (softwareupdate, l'installateur arrive dans /Applications)
 
     private func runMacOS(_ job: DownloadJob, _ installer: Installer) async {
+        if let package = catalog?.packages[installer.build] { return await runPackage(job, installer, package) }
         var process: Process?
         job.cancel = { process?.terminate() }
         let status = await Shell.stream("/usr/sbin/softwareupdate",
@@ -207,6 +210,70 @@ final class DownloadManager {
             job.state = .done
         } else {
             job.state = .failed(status == 0 ? "installateur introuvable après téléchargement" : "softwareupdate a échoué (code \(status))")
+        }
+    }
+
+    // MARK: macOS (paquet officiel d'Apple, sans mot de passe)
+
+    /// Télécharge InstallAssistant.pkg (en morceaux parallèles), vérifie la signature d'Apple, puis assemble
+    /// « Install macOS ….app » directement dans OS/MacOS/Intel : ni /Applications, ni mot de passe.
+    private func runPackage(_ job: DownloadJob, _ installer: Installer, _ package: InstallerPackage) async {
+        let fm = FileManager.default
+        let work = URL(fileURLWithPath: settings.intelFolder).appendingPathComponent(".\(UUID().uuidString).work")
+        defer { try? fm.removeItem(at: work) }
+        try? fm.createDirectory(at: work, withIntermediateDirectories: true)
+        // Le paquet, puis son contenu extrait : il faut environ deux fois sa taille.
+        let free = (try? work.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage ?? .max
+        guard free > package.size * 21 / 10 else {
+            job.state = .failed("espace disque insuffisant (\((package.size * 21 / 10).fileSize) nécessaires)")
+            return
+        }
+        let pkg = work.appendingPathComponent("InstallAssistant.pkg")
+        let downloader = SegmentedDownloader()
+        job.cancel = { downloader.cancel() }
+        job.totalBytes = package.size
+        let result = await downloader.download(package.url, size: package.size, to: pkg) { written, total in
+            Task { @MainActor in self.update(job, progress: Double(written) / Double(max(total, 1)) * 0.95) }
+        }
+        job.cancel = nil
+        if job.state == .cancelled { return }
+        if case let .failure(error) = result { job.state = .failed(error.localizedDescription); return }
+
+        job.state = .verifying
+        let signature = await Shell.run("/usr/sbin/pkgutil", ["--check-signature", pkg.path])
+        guard signature.status == 0, signature.output.contains("signed Apple Software") else {
+            job.state = .failed("paquet non signé par Apple")
+            return
+        }
+        let out = work.appendingPathComponent("out")
+        guard await Shell.run("/usr/sbin/pkgutil", ["--expand-full", pkg.path, out.path]).status == 0 else {
+            job.state = .failed("paquet illisible")
+            return
+        }
+        try? fm.removeItem(at: pkg)
+        let apps = out.appendingPathComponent("Payload/Applications")
+        guard let name = (try? fm.contentsOfDirectory(atPath: apps.path))?.first(where: { $0.hasSuffix(".app") }) else {
+            job.state = .failed("installateur absent du paquet")
+            return
+        }
+        let app = apps.appendingPathComponent(name)
+        let destination = URL(fileURLWithPath: settings.installerPath(name: installer.name, version: installer.version))
+        do {
+            let shared = app.appendingPathComponent("Contents/SharedSupport")
+            try fm.createDirectory(at: shared, withIntermediateDirectories: true)
+            try fm.moveItem(at: out.appendingPathComponent("SharedSupport.dmg"), to: shared.appendingPathComponent("SharedSupport.dmg"))
+            if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
+            try fm.moveItem(at: app, to: destination)
+        } catch {
+            job.state = .failed(error.localizedDescription)
+            return
+        }
+        await library.scan()
+        if library.installer(matching: installer) != nil {
+            job.progress = 1
+            job.state = .done
+        } else {
+            job.state = .failed("installateur assemblé mais version différente")
         }
     }
 
