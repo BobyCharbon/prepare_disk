@@ -50,7 +50,7 @@ struct RootView: View {
 
     private func badge(for page: Page) -> Int {
         switch page {
-        case .downloads: return model.downloads.active.count
+        case .downloads: return model.downloads.active.count + model.downloads.external.count
         case .disks: return model.disks.disks.count
         case .library: return model.library.suggestions.filter(\.isInstaller).count
         case .ipsw: return model.library.suggestions.filter { !$0.isInstaller }.count
@@ -76,7 +76,7 @@ struct RootView: View {
     @ViewBuilder
     private var statusFooter: some View {
         let preparer = model.preparer
-        if preparer.isRunning || model.downloads.current != nil {
+        if preparer.isRunning || model.downloads.current != nil || !model.downloads.external.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 if preparer.isRunning {
                     Text(preparer.title).font(.caption.weight(.semibold))
@@ -85,6 +85,10 @@ struct RootView: View {
                 } else if let job = model.downloads.current {
                     Text(job.title).font(.caption.weight(.semibold)).lineLimit(1)
                     ProgressView(value: job.progress).controlSize(.small)
+                } else if let other = model.downloads.external.first {
+                    Text(other.title).font(.caption.weight(.semibold)).lineLimit(1)
+                    ProgressView(value: other.progress).controlSize(.small)
+                    Text("en arrière-plan").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             .padding(10)

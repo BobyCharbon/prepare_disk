@@ -68,6 +68,13 @@ final class AppModel {
         }
         _ = await (scan, list, firmwares)
         autoRefresh()
+        // Téléchargements faits par l'icône de la barre des menus : affichés ici en direct.
+        Task { @MainActor [weak self] in
+            while let self {
+                self.downloads.external = SharedDownloads.others()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
         await library.scan()   // reconnaît les IPSW au nom d'Apple, maintenant que la liste est chargée
         if settings.checkUpdatesAtLaunch { checkForUpdates(notify: true) }
         autoDownloadTick()
@@ -324,6 +331,10 @@ final class AppModel {
             let key = DownloadJob(kind: kind).key
             if downloads.active.contains(where: { $0.key == key }) { continue }
             var failures = autoAttempts[key]?.failures ?? 0
+            // Annulé à la main : on ne le relance pas derrière le dos de l'utilisateur.
+            if downloads.jobs.last(where: { $0.key == key })?.state == .cancelled { continue }
+            // Déjà en cours dans un autre processus (l'app ou l'icône).
+            if SharedDownloads.others().contains(where: { $0.key == key }) { continue }
             if let last = downloads.jobs.last(where: { $0.key == key }), case .failed = last.state { failures += 1 }
             if let previous = autoAttempts[key], failures > 0 {
                 let wait = Self.backoff[min(failures, Self.backoff.count) - 1]

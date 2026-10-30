@@ -6,12 +6,19 @@ struct DownloadsView: View {
 
     var body: some View {
         List {
-            ForEach(model.downloads.jobs.reversed()) { job in
-                DownloadRow(model: model, job: job, compact: false).padding(.vertical, 4)
+            if !model.downloads.external.isEmpty {
+                Section("En arrière-plan (icône de la barre des menus)") {
+                    ForEach(model.downloads.external) { ExternalDownloadRow(download: $0).padding(.vertical, 4) }
+                }
+            }
+            Section(model.downloads.external.isEmpty ? "" : "Dans l'app") {
+                ForEach(model.downloads.jobs.reversed()) { job in
+                    DownloadRow(model: model, job: job, compact: false).padding(.vertical, 4)
+                }
             }
         }
         .overlay {
-            if model.downloads.jobs.isEmpty {
+            if model.downloads.jobs.isEmpty && model.downloads.external.isEmpty {
                 ContentUnavailableView("Aucun téléchargement", systemImage: "arrow.down.circle",
                                        description: Text("Les installateurs macOS et les IPSW téléchargés apparaissent ici."))
             }
@@ -88,6 +95,39 @@ struct DownloadRow: View {
         case .failed: return .red
         case .running, .verifying: return .accentColor
         default: return .secondary
+        }
+    }
+}
+
+/// Un téléchargement fait par un autre processus : progression, vitesse, temps restant, et annulation à distance.
+struct ExternalDownloadRow: View {
+    let download: SharedDownload
+    @State private var cancelling = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Image(systemName: "arrow.down.circle").foregroundStyle(.blue)
+                Text(download.title).fontWeight(.medium)
+                Spacer()
+                Text(download.verifying ? "Vérification…" : "\(Int(download.progress * 100)) %")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.blue)
+                Button(cancelling ? "Annulation…" : "Annuler", role: .destructive) {
+                    cancelling = true
+                    SharedDownloads.requestCancel(download)
+                }
+                .controlSize(.small)
+                .disabled(cancelling)
+            }
+            ProgressView(value: download.verifying ? nil : download.progress)
+            HStack(spacing: 6) {
+                if download.total > 0 {
+                    Text("\(Int64(Double(download.total) * download.progress).fileSize) sur \(download.total.fileSize)")
+                }
+                if download.speed > 0 { Text("· \(Int64(download.speed).fileSize)/s") }
+                if let eta = download.eta { Text("· reste \(formatDuration(eta))") }
+            }
+            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
         }
     }
 }

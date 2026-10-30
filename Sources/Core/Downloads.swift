@@ -64,6 +64,10 @@ struct SharedDownload: Codable, Identifiable {
     let title: String
     let progress: Double
     let verifying: Bool
+    var total: Int64 = 0
+    var speed: Double = 0          // octets / seconde
+    var eta: TimeInterval?
+    var pid: Int32 = 0             // processus qui télécharge (pour lui demander d'annuler)
     var id: String { key }
 }
 
@@ -72,19 +76,41 @@ enum SharedDownloads {
     private static let folder = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/PrepareDisk/downloads")
 
     @MainActor
+    static func shared(_ job: DownloadJob) -> SharedDownload {
+        SharedDownload(key: job.key, title: job.title, progress: job.progress, verifying: job.state == .verifying,
+                       total: job.totalBytes, speed: job.speed, eta: job.eta, pid: getpid())
+    }
+
+    @MainActor
     static func publish(_ jobs: [DownloadJob]) {
         let file = folder.appendingPathComponent("\(getpid()).json")
         let active = jobs.filter { !$0.isFinished }
         if active.isEmpty { try? FileManager.default.removeItem(at: file); return }
-        let shared = active.map { SharedDownload(key: $0.key, title: $0.title, progress: $0.progress, verifying: $0.state == .verifying) }
+        let shared = active.map(shared)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? JSONEncoder().encode(shared).write(to: file, options: .atomic)
+    }
+
+    /// Demande au processus qui télécharge d'annuler ce téléchargement.
+    static func requestCancel(_ download: SharedDownload) {
+        let folder = folder.appendingPathComponent("cancel-\(download.pid)")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = Data(download.key.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_")
+        FileManager.default.createFile(atPath: folder.appendingPathComponent(name).path, contents: nil)
+    }
+
+    /// Annulations demandées à ce processus par un autre (lues puis effacées).
+    static func takeCancelRequests() -> Set<String> {
+        let folder = folder.appendingPathComponent("cancel-\(getpid())")
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        try? FileManager.default.removeItem(at: folder)
+        return Set(names.compactMap { Data(base64Encoded: $0.replacingOccurrences(of: "_", with: "/")).map { String(decoding: $0, as: UTF8.self) } })
     }
 
     /// Les téléchargements des autres processus encore en vie (fichier récent).
     static func others() -> [SharedDownload] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
-        return names.flatMap { name -> [SharedDownload] in
+        return names.filter { $0.hasSuffix(".json") }.flatMap { name -> [SharedDownload] in
             let url = folder.appendingPathComponent(name)
             guard let pid = Int32((name as NSString).deletingPathExtension), pid != getpid() else { return [] }
             let fresh = ((try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate)
@@ -103,6 +129,8 @@ final class DownloadManager {
     private let library: Library
     private let notifier: Notifier
     var jobs: [DownloadJob] = []
+    /// Téléchargements faits par un autre processus (l'icône de la barre des menus), relus toutes les 2 secondes.
+    var external: [SharedDownload] = []
     /// Pour trouver le paquet officiel d'un macOS dans le catalogue d'Apple.
     weak var catalog: Catalog?
     /// Appelé quand la file est vide après au moins un téléchargement réussi (nettoyage des anciennes versions).
@@ -155,6 +183,9 @@ final class DownloadManager {
                 Task {
                     while awake != nil {
                         SharedDownloads.publish(jobs)
+                        // Annulations demandées depuis l'app (ou depuis l'icône).
+                        let cancels = SharedDownloads.takeCancelRequests()
+                        for job in jobs where cancels.contains(job.key) && !job.isFinished { cancel(job) }
                         try? await Task.sleep(for: .seconds(1))
                     }
                     SharedDownloads.publish([])
