@@ -45,6 +45,20 @@ else
     echo "ATTENTION : aucun certificat dans le trousseau, signature ad hoc."
     codesign --force --sign - "$APP"
 fi
+# Notarisation par Apple (NOTARIZE=1, pour les versions publiées) : une app téléchargée s'ouvre alors
+# sans aucun avertissement. Clé d'API App Store Connect : variables NOTARY_*, ou fichiers de ~/PrepareDisk_signing.
+if [ "${NOTARIZE:-0}" = 1 ] && [ -n "$DEVELOPER_ID" ]; then
+    KEY="${NOTARY_KEY_PATH:-$(ls ~/PrepareDisk_signing/AuthKey_*.p8 2>/dev/null | head -1)}"
+    KEY_ID="${NOTARY_KEY_ID:-$(cat ~/PrepareDisk_signing/notary-key-id.txt 2>/dev/null)}"
+    ISSUER="${NOTARY_ISSUER:-$(cat ~/PrepareDisk_signing/notary-issuer.txt 2>/dev/null)}"
+    ditto -c -k --keepParent "$APP" notarize.zip
+    xcrun notarytool submit notarize.zip --key "$KEY" --key-id "$KEY_ID" --issuer "$ISSUER" --wait | tee notarize.log
+    rm -f notarize.zip
+    grep -q "status: Accepted" notarize.log || { echo "ERREUR : notarisation refusée par Apple"; rm -f notarize.log; exit 1; }
+    rm -f notarize.log
+    xcrun stapler staple "$APP"
+fi
+
 # Toujours une copie zippée, prête à distribuer (c'est elle que publie GitHub).
 # PrepareDisk.zip (lien fixe « dernière version ») et PrepareDisk-<version>.zip.
 rm -f PrepareDisk*.zip

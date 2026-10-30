@@ -10,28 +10,38 @@ jobs:
   release:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Installer le certificat de signature
+      - name: Installer le certificat Developer ID
         env:
-          SIGNING_P12: ${{ secrets.SIGNING_P12 }}
-          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
         run: |
           KC="$RUNNER_TEMP/signing.keychain-db"
-          echo "$SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
           security create-keychain -p ci "$KC"
           security set-keychain-settings "$KC"
           security unlock-keychain -p ci "$KC"
-          security import "$RUNNER_TEMP/signing.p12" -k "$KC" -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+          security import "$RUNNER_TEMP/signing.p12" -k "$KC" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC" >/dev/null
           security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/signing.p12"
 
-      - name: Compiler
-        run: ./build_app.sh "$(cat VERSION)"
+      - name: Compiler, signer et notariser
+        env:
+          NOTARIZE: "1"
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          echo "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          NOTARY_KEY_PATH="$RUNNER_TEMP/notary.p8" ./build_app.sh "$(cat VERSION)"
+          rm "$RUNNER_TEMP/notary.p8"
 
-      - name: Vérifier la signature
-        run: codesign --verify --deep --strict '-R=identifier "com.bobycharbon.preparedisk" and certificate root = H"2a4993ddca84b3ae2874dce2ef7cd304c3947083"' "Prepare Disk.app"
+      - name: Vérifier la signature et la notarisation
+        run: |
+          codesign --verify --deep --strict '-R=identifier "com.bobycharbon.preparedisk" and anchor apple generic and certificate leaf[subject.OU] = "GS2B6GA9JA"' "Prepare Disk.app"
+          spctl -a -vvv -t exec "Prepare Disk.app"
 
       - name: Publier
         env:
