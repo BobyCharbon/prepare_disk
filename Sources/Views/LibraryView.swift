@@ -133,7 +133,7 @@ private struct AvailableRow: View {
             if isLatest { Pill(text: "Dernière", color: .blue) }
             if model.settings.selected.contains(installer.version) { Pill(text: "Choisi", color: .purple) }
             Spacer()
-            if model.library.installer(for: installer.version) != nil {
+            if model.library.installer(matching: installer) != nil {
                 Pill(text: "Téléchargé", color: .green, icon: "checkmark.circle")
             } else if let job = model.downloads.active.first(where: { $0.key == "macos-" + installer.version }) {
                 ProgressView(value: job.progress).frame(width: 120)

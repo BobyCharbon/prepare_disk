@@ -63,7 +63,7 @@ struct IPSWView: View {
                 let fw = model.catalog.macFirmware(identifier: settings.macIdentifier, version: version, pinned: settings.macIPSWVersions[slot])
                 let destination = settings.macIPSWPath(fw?.version ?? version)
                 FirmwareRow(model: model, title: "Pour macOS \(version)", firmware: fw,
-                            local: model.library.macIPSW(version: fw?.version ?? version), destination: destination,
+                            local: fw.flatMap { model.library.ipsw($0, device: nil) }, destination: destination,
                             note: settings.macIPSWSlots[slot] ? nil : "non copié sur le disque")
             }
             if !old.isEmpty {
@@ -124,13 +124,13 @@ struct IPSWView: View {
         let settings = model.settings
         for (slot, version) in settings.selected.enumerated() where !version.isEmpty {
             if let fw = model.catalog.macFirmware(identifier: settings.macIdentifier, version: version, pinned: settings.macIPSWVersions[slot]),
-               fw.signed, model.library.macIPSW(version: fw.version) == nil {
+               fw.signed, model.library.ipsw(fw, device: nil) == nil {
                 model.downloads.enqueue(.ipsw(fw, destination: settings.macIPSWPath(fw.version)))
             }
         }
         for device in settings.enabledDevices {
             if let fw = model.catalog.iPadFirmware(device), fw.signed,
-               !(model.library.iPadIPSWs[device.name] ?? []).contains(where: { $0.version == fw.version }) {
+               model.library.ipsw(fw, device: device) == nil {
                 model.downloads.enqueue(.ipsw(fw, destination: settings.ipswPath(device, fw.version)))
             }
         }

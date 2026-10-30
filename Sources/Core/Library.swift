@@ -27,6 +27,8 @@ struct LocalFile: Identifiable, Hashable {
     /// Pour un IPSW : lus dans son BuildManifest.plist (fiable) ; sinon déduits du nom.
     var version: String?
     var build: String?
+    /// Modèles acceptés par l'IPSW (ex. ["iPad13,18", "iPad13,19"]), lus dans le BuildManifest.
+    var productTypes: [String] = []
     var id: String { path }
     var name: String { (path as NSString).lastPathComponent }
 
@@ -38,16 +40,23 @@ struct LocalFile: Identifiable, Hashable {
         if path.lowercased().hasSuffix(".ipsw"), let manifest = ipswManifest(path, size: size, date: date) {
             version = manifest.version
             build = manifest.build
+            productTypes = manifest.productTypes
         }
+    }
+
+    /// Le même firmware : même build si on le connaît (identifiant exact), sinon même version.
+    func matches(_ firmware: Firmware) -> Bool {
+        if !productTypes.isEmpty && !productTypes.contains(firmware.identifier) { return false }
+        return build.map { $0 == firmware.buildid } ?? (version == firmware.version)
     }
 }
 
 /// Version et build d'un IPSW, lus dans son BuildManifest.plist : le nom du fichier peut mentir.
 /// Mis en cache (chemin, taille, date) : la lecture prend ~0,2 s.
-private func ipswManifest(_ path: String, size: Int64, date: Date) -> (version: String, build: String)? {
+private func ipswManifest(_ path: String, size: Int64, date: Date) -> (version: String, build: String, productTypes: [String])? {
     let key = "\(path)|\(size)|\(date.timeIntervalSince1970)"
-    var cache = UserDefaults.standard.dictionary(forKey: "ipswManifestCache") as? [String: [String]] ?? [:]
-    if let hit = cache[key], hit.count == 2 { return (hit[0], hit[1]) }
+    var cache = UserDefaults.standard.dictionary(forKey: "ipswManifestCache3") as? [String: [String]] ?? [:]
+    if let hit = cache[key], hit.count == 3 { return (hit[0], hit[1], hit[2].split(separator: " ").map(String.init)) }
     let process = Process()
     let pipe = Pipe()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
@@ -60,9 +69,10 @@ private func ipswManifest(_ path: String, size: Int64, date: Date) -> (version: 
     guard let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
           let version = plist["ProductVersion"] as? String,
           let build = plist["ProductBuildVersion"] as? String else { return nil }
-    cache[key] = [version, build]
-    UserDefaults.standard.set(cache, forKey: "ipswManifestCache")
-    return (version, build)
+    let types = plist["SupportedProductTypes"] as? [String] ?? []
+    cache[key] = [version, build, types.joined(separator: " ")]   // les identifiants contiennent des virgules (iPad13,18)
+    UserDefaults.standard.set(cache, forKey: "ipswManifestCache3")
+    return (version, build, types)
 }
 
 /// Un fichier à ranger : déplacé dans son dossier et/ou renommé "Modèle - Version".
@@ -120,7 +130,8 @@ final class Library {
         var proposals: [Suggestion] = []
         func suggest(_ path: String, _ destination: String) {
             guard path != destination, !dismissed.contains(path),
-                  !FileManager.default.fileExists(atPath: destination) else { return }
+                  !FileManager.default.fileExists(atPath: destination),
+                  !proposals.contains(where: { $0.destination == destination }) else { return }   // doublon : une seule copie à ranger
             proposals.append(Suggestion(path: path, destination: destination))
         }
 
@@ -144,15 +155,17 @@ final class Library {
         }
         installers = found.sorted { ($0.version ?? "").isNewerVersion(than: $1.version ?? "") }
 
-        var mac = files(in: settings.siliconFolder, extensions: ["ipsw", "zip"])
+        // Chaque IPSW est attribué d'après les modèles qu'il contient (BuildManifest), pas d'après son nom
+        // ou son dossier : un IPSW d'iPad 11 posé dans le dossier de l'iPad 10 est proposé au rangement.
+        var mac: [LocalFile] = []
         var ipads: [String: [LocalFile]] = [:]
+        var candidates: [(LocalFile, Owner?)] = files(in: settings.siliconFolder, extensions: ["ipsw", "zip"]).map { ($0, .mac) }
         for device in settings.devices {
-            ipads[device.name] = files(in: settings.folder(for: device), extensions: ["ipsw", "zip"])
+            candidates += files(in: settings.folder(for: device), extensions: ["ipsw", "zip"]).map { ($0, Owner.device(device)) }
         }
-        // Les fichiers trouvés ailleurs comptent aussi : on peut les laisser où ils sont.
-        for path in elsewhere.ipsws {
-            let file = LocalFile(path: path, size: itemSize(path), date: modificationDate(path))
-            switch owner(of: file) {
+        candidates += elsewhere.ipsws.map { path in (LocalFile(path: path, size: itemSize(path), date: modificationDate(path)), nil) }
+        for (file, folder) in candidates {
+            switch owner(of: file, folder: folder) {
             case .mac: mac.append(file)
             case let .device(device): ipads[device.name, default: []].append(file)
             case nil: break
@@ -172,8 +185,16 @@ final class Library {
 
     private enum Owner { case mac, device(Device) }
 
-    /// À quel appareil appartient un IPSW : d'après notre nom ("iPad 10ème Gen - …"), sinon le nom d'origine d'Apple.
-    private func owner(of file: LocalFile) -> Owner? {
+    /// À quel appareil appartient un IPSW : d'après les modèles de son BuildManifest ; à défaut (fichier illisible),
+    /// d'après son dossier, notre nom ("iPad 10ème Gen - …") ou le nom d'origine d'Apple.
+    private func owner(of file: LocalFile, folder: Owner?) -> Owner? {
+        if !file.productTypes.isEmpty {
+            if file.productTypes.contains(settings.macIdentifier) { return .mac }
+            let matches = settings.devices.filter { file.productTypes.contains($0.identifier) }
+            if case let .device(current)? = folder, matches.contains(where: { $0.id == current.id }) { return folder }
+            return (matches.first(where: \.enabled) ?? matches.first).map { .device($0) }
+        }
+        if let folder { return folder }
         let name = file.name
         if name.hasPrefix(settings.macIPSWPrefix) { return .mac }
         if let device = settings.devices.first(where: { name.hasPrefix($0.name) }) { return .device(device) }
@@ -255,12 +276,27 @@ final class Library {
 
     // MARK: Recherches
 
-    func installer(for version: String) -> LocalInstaller? {
-        installers.first { $0.version == version }
+    /// Installateur local de cette version ; avec `build`, il doit aussi avoir ce build (s'il est connu).
+    func installer(for version: String, build: String? = nil) -> LocalInstaller? {
+        let same = installers.filter { $0.version == version && (build == nil || $0.build == nil || $0.build == build) }
+        // De préférence celui qui est déjà rangé dans le dossier Intel.
+        return same.first { $0.path.hasPrefix(settings.intelFolder + "/") } ?? same.first
+    }
+
+    func installer(matching installer: Installer) -> LocalInstaller? {
+        self.installer(for: installer.version, build: installer.build)
     }
 
     func macIPSW(version: String) -> LocalFile? {
         macIPSWs.first { $0.version == version }
+    }
+
+    /// IPSW local de ce firmware (même build, même modèle), de préférence celui qui est déjà bien rangé.
+    func ipsw(_ firmware: Firmware, device: Device?) -> LocalFile? {
+        let list = device.map { iPadIPSWs[$0.name] ?? [] } ?? macIPSWs
+        let folder = device.map(settings.folder(for:)) ?? settings.siliconFolder
+        let same = list.filter { $0.matches(firmware) }
+        return same.first { $0.path.hasPrefix(folder + "/") } ?? same.first
     }
 
     func latestIPadIPSW(_ device: Device) -> LocalFile? {

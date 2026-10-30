@@ -57,6 +57,7 @@ final class AppModel {
             settings.selected = Array((picks + ["", "", ""]).prefix(3))
         }
         _ = await (scan, list, firmwares)
+        autoRefresh()
         await library.scan()   // reconnaît les IPSW au nom d'Apple, maintenant que la liste est chargée
         if settings.checkUpdatesAtLaunch { checkForUpdates(notify: true) }
     }
@@ -119,23 +120,23 @@ final class AppModel {
         }
         // IPSW Mac : ceux du dossier Silicon qui ne correspondent à aucun macOS coché.
         if settings.includeMacIPSW {
-            let wanted = settings.selected.indices.compactMap { slot -> String? in
+            let wanted = settings.selected.indices.compactMap { slot -> Firmware? in
                 guard !settings.selected[slot].isEmpty, settings.macIPSWSlots[slot] else { return nil }
                 return catalog.macFirmware(identifier: settings.macIdentifier, version: settings.selected[slot],
-                                           pinned: settings.macIPSWVersions[slot])?.version
+                                           pinned: settings.macIPSWVersions[slot])
             }
             let silicon = library.macIPSWs.filter { $0.path.hasPrefix(settings.siliconFolder + "/") }
-            if !wanted.isEmpty, wanted.allSatisfy({ v in silicon.contains { $0.version == v } }) {
-                old += silicon.filter { !wanted.contains($0.version ?? "") }.map(\.path)
+            if !wanted.isEmpty, wanted.allSatisfy({ fw in silicon.contains { $0.matches(fw) } }) {
+                old += silicon.filter { file in !wanted.contains { file.matches($0) } }.map(\.path)
             }
         }
         // IPSW iPad : dans le dossier de chaque iPad coché, tout sauf la version validée.
         if settings.includeIPadIPSW {
             for device in settings.enabledDevices {
-                guard let version = catalog.iPadFirmware(device)?.version else { continue }
+                guard let fw = catalog.iPadFirmware(device) else { continue }
                 let files = (library.iPadIPSWs[device.name] ?? []).filter { $0.path.hasPrefix(settings.folder(for: device) + "/") }
-                if files.contains(where: { $0.version == version }) {
-                    old += files.filter { $0.version != version }.map(\.path)
+                if files.contains(where: { $0.matches(fw) }) {
+                    old += files.filter { !$0.matches(fw) }.map(\.path)
                 }
             }
         }
@@ -164,6 +165,27 @@ final class AppModel {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
     }
 
+    // MARK: Actualisation automatique
+
+    /// Personne n'appuie sur « Actualiser » : les fichiers sont relus toutes les 15 s quand l'app est au premier plan
+    /// (et à chaque retour dans l'app), les versions d'Apple toutes les 3 heures.
+    private func autoRefresh() {
+        Task { @MainActor [weak self] in
+            var lastApple = Date()
+            while let self {
+                try? await Task.sleep(for: .seconds(15))
+                guard !self.preparer.isRunning else { continue }
+                if Date().timeIntervalSince(lastApple) > 3 * 3600 {
+                    lastApple = Date()
+                    await self.catalog.loadInstallers()
+                    await self.refreshFirmwares()
+                    self.checkForUpdates(notify: true)
+                }
+                if NSApp.isActive && !self.library.isScanning { await self.library.scan() }
+            }
+        }
+    }
+
     // MARK: Disques
 
     /// Actualise la liste dès qu'un disque est branché ou éjecté.
@@ -178,9 +200,14 @@ final class AppModel {
                 }
             }
         }
-        // Au retour des Réglages Système, on revérifie l'autorisation.
+        // Au retour dans l'app (Réglages Système, Finder…) : on revérifie l'autorisation et on relit les fichiers,
+        // pour voir tout de suite un IPSW déplacé ou supprimé à la main.
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.hasFullDiskAccess = AppModel.checkFullDiskAccess() }
+            Task { @MainActor in
+                guard let self else { return }
+                self.hasFullDiskAccess = AppModel.checkFullDiskAccess()
+                if !self.library.isScanning && !self.preparer.isRunning { await self.library.scan() }
+            }
         }
     }
 }

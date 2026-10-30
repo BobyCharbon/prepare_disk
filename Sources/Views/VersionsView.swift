@@ -85,7 +85,7 @@ struct VersionsView: View {
             Spacer()
             if !version.isEmpty {
                 LatestPill(chosen: version, latest: latest?.version)
-                if let local = model.library.installer(for: version) {
+                if let local = model.library.installer(for: version, build: model.catalog.installer(version: version)?.build) {
                     local.path.hasPrefix(model.settings.intelFolder + "/")
                         ? Pill(text: "Sur ce Mac", color: .green, icon: "checkmark.circle")
                         : Pill(text: "Sur ce Mac, à ranger", color: .orange, icon: "tray.and.arrow.down")
@@ -115,7 +115,7 @@ struct VersionsView: View {
         }
         var items: [Needed] = []
         for version in settings.selected where !version.isEmpty {
-            let state = inFolder(library.installer(for: version)?.path, settings.intelFolder)
+            let state = inFolder(library.installer(for: version, build: catalog.installer(version: version)?.build)?.path, settings.intelFolder)
             items.append(Needed(label: "macOS \(version)", state: state,
                                 download: state == .missing ? catalog.installer(version: version).map { .macOS($0) } : nil))
         }
@@ -123,7 +123,7 @@ struct VersionsView: View {
             for (slot, version) in settings.selected.enumerated() where !version.isEmpty && settings.macIPSWSlots[slot] {
                 guard let fw = catalog.macFirmware(identifier: settings.macIdentifier, version: version,
                                                    pinned: settings.macIPSWVersions[slot]), fw.signed else { continue }
-                let state = inFolder(library.macIPSW(version: fw.version)?.path, settings.siliconFolder)
+                let state = inFolder(library.ipsw(fw, device: nil)?.path, settings.siliconFolder)
                 items.append(Needed(label: "IPSW Mac \(fw.version)", state: state,
                                     download: state == .missing ? .ipsw(fw, destination: settings.macIPSWPath(fw.version)) : nil))
             }
@@ -131,7 +131,7 @@ struct VersionsView: View {
         if settings.includeIPadIPSW {
             for device in settings.enabledDevices {
                 guard let fw = catalog.iPadFirmware(device), fw.signed else { continue }
-                let local = library.iPadIPSWs[device.name]?.first { $0.version == fw.version }
+                let local = library.ipsw(fw, device: device)
                 let state = inFolder(local?.path, settings.folder(for: device))
                 items.append(Needed(label: "\(device.name) \(fw.version)", state: state,
                                     download: state == .missing ? .ipsw(fw, destination: settings.ipswPath(device, fw.version)) : nil))

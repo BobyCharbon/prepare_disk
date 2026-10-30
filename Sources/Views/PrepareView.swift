@@ -169,7 +169,7 @@ private struct SlotCard: View {
         } content: {
             if let installer {
                 HStack {
-                    if let local = model.library.installer(for: installer.version) {
+                    if let local = model.library.installer(matching: installer) {
                         Pill(text: "Téléchargé", color: .green, icon: "checkmark.circle")
                         Text(local.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     } else if let job = model.downloads.active.first(where: { $0.key == "macos-" + installer.version }) {
@@ -202,7 +202,7 @@ struct VersionPicker: View {
             ForEach(majors, id: \.self) { major in
                 Section(model.catalog.installers.first { $0.major == major }.map { "macOS \($0.name)" } ?? major) {
                     ForEach(model.catalog.installers.filter { $0.major == major }) { i in
-                        let isLocal = model.library.installer(for: i.version) != nil
+                        let isLocal = model.library.installer(matching: i) != nil
                         Label { Text(isLocal ? "\(i.version) (\(i.build)) — sur ce Mac" : "\(i.version) (\(i.build))") } icon: {
                             Image(systemName: isLocal ? "checkmark.circle.fill" : "arrow.down.circle")
                                 .foregroundStyle(isLocal ? .green : .secondary)
@@ -300,7 +300,7 @@ struct MacIPSWRow: View {
         let settings = model.settings
         let pinned = settings.macIPSWVersions[slot]
         let fw = model.catalog.macFirmware(identifier: settings.macIdentifier, version: version, pinned: pinned)
-        let local = model.library.macIPSW(version: fw?.version ?? version)
+        let local = fw.flatMap { model.library.ipsw($0, device: nil) }
         let auto = model.catalog.macFirmware(identifier: settings.macIdentifier, version: version)
         HStack {
             Toggle(isOn: $model.settings.macIPSWSlots[slot]) {
@@ -323,8 +323,7 @@ struct MacIPSWRow: View {
             } else if let fw {
                 let latest = model.catalog.signedFirmwares(identifier: settings.macIdentifier).first { $0.version.majorVersion == version.majorVersion }
                 LatestPill(chosen: fw.version, latest: latest?.version)
-                local != nil ? Pill(text: "Sur ce Mac", color: .green, icon: "checkmark.circle")
-                             : Pill(text: "Sera téléchargé (\(fw.filesize.fileSize))", color: .orange, icon: "arrow.down.circle")
+                LocalPill(path: local?.path, folder: settings.siliconFolder, size: fw.filesize)
             } else {
                 Text("Aucun IPSW signé").foregroundStyle(.secondary)
             }
@@ -359,9 +358,7 @@ struct IPadRow: View {
                 Pill(text: "Ne sera pas installé", color: .red, icon: "nosign")
             } else if let fw {
                 LatestPill(chosen: fw.version, latest: latest?.version)
-                local.contains(where: { $0.version == fw.version })
-                    ? Pill(text: "Sur ce Mac", color: .green, icon: "checkmark.circle")
-                    : Pill(text: "Sera téléchargé (\(fw.filesize.fileSize))", color: .orange, icon: "arrow.down.circle")
+                LocalPill(path: model.library.ipsw(fw, device: device)?.path, folder: model.settings.folder(for: device), size: fw.filesize)
             } else if let file = local.first {
                 Pill(text: "Local : \(file.version ?? file.name)", color: .secondary)
             }
@@ -674,6 +671,23 @@ struct LatestPill: View {
             Pill(text: "\(latest) chez Apple", color: .blue, icon: "sparkles")
         } else if latest != nil {
             Pill(text: "Dernière version Apple", color: .teal, icon: "checkmark.seal")
+        }
+    }
+}
+
+/// « Sur ce Mac » (bien rangé), « Sur ce Mac, à ranger » (ailleurs sur le Mac) ou « Sera téléchargé ».
+struct LocalPill: View {
+    let path: String?
+    let folder: String
+    let size: Int64
+
+    var body: some View {
+        if let path {
+            path.hasPrefix(folder + "/")
+                ? Pill(text: "Sur ce Mac", color: .green, icon: "checkmark.circle")
+                : Pill(text: "Sur ce Mac, à ranger", color: .orange, icon: "tray.and.arrow.down")
+        } else {
+            Pill(text: "Sera téléchargé (\(size.fileSize))", color: .orange, icon: "arrow.down.circle")
         }
     }
 }

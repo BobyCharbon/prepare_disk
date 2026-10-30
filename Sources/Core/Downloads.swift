@@ -164,7 +164,7 @@ final class DownloadManager {
             await library.move(app.path, to: settings.installerPath(name: installer.name, version: installer.version))
             await library.scan()
         }
-        if status == 0, library.installer(for: installer.version) != nil {
+        if status == 0, library.installer(matching: installer) != nil {
             job.progress = 1
             job.state = .done
         } else {

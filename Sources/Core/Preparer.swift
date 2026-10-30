@@ -115,7 +115,7 @@ final class Preparer {
         let chosen = settings.selected.compactMap { v in v.isEmpty ? nil : catalog.installer(version: v) }
 
         for installer in chosen {
-            plan.systems.append(PlannedSystem(installer: installer, local: library.installer(for: installer.version),
+            plan.systems.append(PlannedSystem(installer: installer, local: library.installer(matching: installer),
                                               partitionGB: max(settings.partitionSizeGB, installer.requiredPartitionGB)))
             if let latest = catalog.latestInstaller(major: installer.major), latest.version.isNewerVersion(than: installer.version) {
                 plan.warnings.append("macOS \(installer.name) \(latest.version) est disponible (choisi : \(installer.version)).")
@@ -144,7 +144,7 @@ final class Preparer {
                     continue
                 }
                 let name = settings.macIPSWPath(wanted)
-                let local = library.macIPSW(version: wanted)
+                let local = fw.map { library.ipsw($0, device: nil) } ?? library.macIPSW(version: wanted)
                 guard local != nil || fw != nil else {
                     plan.warnings.append("Aucun IPSW Apple Silicon trouvé pour macOS \(version).")
                     continue
@@ -174,7 +174,7 @@ final class Preparer {
                     plan.blocked.append(pinned.isEmpty ? "\(device.name) : aucune version signée par Apple, rien ne sera installé."
                                                        : "\(device.name) : la version \(pinned) est inconnue chez Apple, rien ne sera installé.")
                 } else if let fw = catalog.iPadFirmware(device) {
-                    let local = files.first { $0.version == fw.version }
+                    let local = library.ipsw(fw, device: device)
                     let name = settings.ipswPath(device, fw.version)
                     let source = local?.path ?? name
                     plan.dataItems.append(DataItem(category: device.name, label: "\(device.name) — iPadOS \(fw.version)",
@@ -264,7 +264,7 @@ final class Preparer {
 
         var script = ScriptBuilder()
         let installers = replacements.compactMap { os, installer in
-            library.installer(for: installer.version).map { (os.partition, installer, $0) }
+            library.installer(matching: installer).map { (os.partition, installer, $0) }
         }
         let obsolete = settings.removeOldOnUpdate ? inspection.outdatedFiles.map(\.path) : []
         script.update(disk: diskID, systems: installers, items: newItems,
