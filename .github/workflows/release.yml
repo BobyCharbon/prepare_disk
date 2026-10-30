@@ -1,0 +1,45 @@
+# Publie une version quand on pousse un tag "v1.2.3" (voir release.sh).
+name: Publier une version
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer le certificat de signature
+        env:
+          SIGNING_P12: ${{ secrets.SIGNING_P12 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/signing.keychain-db"
+          echo "$SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p ci "$KC"
+          security set-keychain-settings "$KC"
+          security unlock-keychain -p ci "$KC"
+          security import "$RUNNER_TEMP/signing.p12" -k "$KC" -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/signing.p12"
+
+      - name: Compiler
+        run: ./build_app.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Vérifier la signature
+        run: codesign --verify --deep --strict '-R=identifier "com.bobycharbon.preparedisk" and certificate root = H"2a4993ddca84b3ae2874dce2ef7cd304c3947083"' "Prepare Disk.app"
+
+      - name: Publier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Notes de la version : la section "## $VERSION — date" du CHANGELOG.
+          awk -v v="$VERSION" '/^## /{p = ($2 == v); next} p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "Pas de section ## $VERSION dans CHANGELOG.md"; exit 1; }
+          DATE=$(grep -m1 "^## $VERSION " CHANGELOG.md | sed 's/^## [^ ]* — //')
+          gh release create "$GITHUB_REF_NAME" PrepareDisk.zip "PrepareDisk-$VERSION.zip" \
+            --title "v$VERSION — $DATE" --notes-file notes.md
