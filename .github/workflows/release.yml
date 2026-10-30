@@ -3,6 +3,7 @@ name: Publier une version
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:   # bouton « Run workflow » : publie la version du fichier VERSION
 permissions:
   contents: write
 jobs:
@@ -27,7 +28,7 @@ jobs:
           rm "$RUNNER_TEMP/signing.p12"
 
       - name: Compiler
-        run: ./build_app.sh "${GITHUB_REF_NAME#v}"
+        run: ./build_app.sh "$(cat VERSION)"
 
       - name: Vérifier la signature
         run: codesign --verify --deep --strict '-R=identifier "com.bobycharbon.preparedisk" and certificate root = H"2a4993ddca84b3ae2874dce2ef7cd304c3947083"' "Prepare Disk.app"
@@ -36,10 +37,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$(cat VERSION)"
           # Notes de la version : la section "## $VERSION — date" du CHANGELOG.
           awk -v v="$VERSION" '/^## /{p = ($2 == v); next} p' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "Pas de section ## $VERSION dans CHANGELOG.md"; exit 1; }
           DATE=$(grep -m1 "^## $VERSION " CHANGELOG.md | sed 's/^## [^ ]* — //')
-          gh release create "$GITHUB_REF_NAME" PrepareDisk.zip "PrepareDisk-$VERSION.zip" \
+          gh release create "v$VERSION" PrepareDisk.zip "PrepareDisk-$VERSION.zip" \
             --title "v$VERSION — $DATE" --notes-file notes.md
