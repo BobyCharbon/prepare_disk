@@ -72,10 +72,6 @@ struct VersionsView: View {
                     }
                 }
 
-                Card(title: "Loops GarageBand", icon: "music.note", subtitle: "Copiées sur les disques ou non") {
-                    Toggle("", isOn: $model.settings.includeLoops).toggleStyle(.switch).labelsHidden()
-                } content: { EmptyView() }
-
                 summary(items)
                 Toggle("Supprimer définitivement les anciennes versions dès que les nouvelles sont téléchargées et vérifiées",
                        isOn: $model.settings.removeOldVersions)

@@ -330,9 +330,6 @@ final class AppModel {
                                     download: state == .missing || state == .corrupted ? .ipsw(fw, destination: settings.ipswPath(device, fw.version)) : nil))
             }
         }
-        if settings.includeLoops {
-            items.append(Needed(label: "Loops GarageBand", state: library.loops.isEmpty ? .missing : .ok))
-        }
         return items
     }
 
