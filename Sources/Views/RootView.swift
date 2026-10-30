@@ -25,6 +25,10 @@ struct RootView: View {
             }
         } detail: {
             detail
+                // Les réglages manquants, en rouge, tout en haut de chaque page.
+                .safeAreaInset(edge: .top) {
+                    SetupChecklist(model: model).padding([.horizontal, .top], 16).frame(maxWidth: 932)
+                }
                 .navigationTitle(model.page.title)
                 .toolbar {
                     ToolbarItem {

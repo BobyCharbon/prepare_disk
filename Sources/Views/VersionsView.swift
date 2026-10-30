@@ -20,7 +20,6 @@ struct VersionsView: View {
                                                                         set: { model.setAutoDownload($0) }))
                         .toggleStyle(.switch)
                         .help("Télécharge tout seul les versions validées dès qu'elles changent, recommence en cas d'échec et garde le Mac éveillé. Idéal pour les Mac de production.")
-                    if let note = model.loginItemNote { Text(note).font(.caption).foregroundStyle(.orange) }
                     Button { toDownload.forEach { model.downloads.enqueue($0) } } label: {
                         Label(toDownload.isEmpty ? "Tout est téléchargé" : "Tout télécharger (\(toDownload.count))", systemImage: "arrow.down.circle.fill")
                     }
@@ -30,7 +29,6 @@ struct VersionsView: View {
                     }
                 }
                 ValidatedBanner(model: model)
-                HelperBanner(model: model)
                 ForEach(model.preparer.plan().blocked, id: \.self) { Banner(text: $0, color: .red, icon: "nosign") }
 
                 Card(title: "macOS", icon: "apple.logo", subtitle: "Une partition bootable par version") {

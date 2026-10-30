@@ -198,22 +198,70 @@ struct ChecksList: View {
     }
 }
 
-/// Avertit quand l'app n'a pas l'accès complet au disque (nécessaire à createinstallmedia).
-struct FullDiskAccessBanner: View {
+/// Tout ce qu'il reste à régler sur ce Mac, en rouge, tout en haut de l'app, avec un bouton vers le bon réglage.
+/// Chaque ligne disparaît dès que c'est réglé (vérifié au retour dans l'app et toutes les 15 secondes).
+struct SetupChecklist: View {
     @Bindable var model: AppModel
 
-    var body: some View {
+    private struct Item: Identifiable {
+        let id: String
+        let icon: String
+        let title: String
+        let detail: String
+        let button: String
+        let action: () -> Void
+    }
+
+    private var items: [Item] {
+        var items: [Item] = []
         if !model.hasFullDiskAccess {
-            VStack(alignment: .leading, spacing: 8) {
-                Banner(text: "Prepare Disk n'a pas l'« Accès complet au disque ». Sans lui, macOS bloque la création de l'installateur "
-                       + "(« The bless of the installer disk failed »). Ajoutez Prepare Disk dans Réglages Système › Confidentialité "
-                       + "et sécurité › Accès complet au disque, puis revenez ici.", color: .red, icon: "lock.trianglebadge.exclamationmark")
-                HStack {
-                    Button("Ouvrir les Réglages Système") { model.openFullDiskAccessSettings() }
-                    Button("Vérifier à nouveau") { model.hasFullDiskAccess = AppModel.checkFullDiskAccess() }
+            items.append(Item(id: "fda", icon: "lock.trianglebadge.exclamationmark.fill", title: "Accès complet au disque",
+                              detail: "Sans lui, macOS bloque la création des disques bootables. Ajoutez Prepare Disk dans la liste et activez-le.",
+                              button: "Ouvrir Accès complet au disque") { model.openFullDiskAccessSettings() })
+        }
+        if !model.helper.isReady {
+            items.append(Item(id: "helper", icon: "key.fill", title: "Configuration unique du mot de passe",
+                              detail: model.helper.error ?? "Tapez le mot de passe administrateur une dernière fois : il ne sera plus jamais demandé.",
+                              button: model.helper.isInstalling ? "Configuration…" : "Configurer") { Task { await model.helper.install() } })
+        }
+        if model.agentStatus == .requiresApproval || model.agentStatus == .notRegistered {
+            items.append(Item(id: "agent", icon: "menubar.rectangle", title: "Autoriser en arrière-plan",
+                              detail: "Nécessaire pour l'icône dans la barre des menus et le téléchargement automatique quand l'app est fermée. Activez Prepare Disk dans « Autoriser en arrière-plan ».",
+                              button: "Ouvrir Ouverture et extensions") { model.registerAgent(); model.openLoginItemsSettings() })
+        }
+        if model.notificationsDenied {
+            items.append(Item(id: "notif", icon: "bell.slash.fill", title: "Notifications désactivées",
+                              detail: "Vous ne serez pas prévenu des téléchargements terminés ni des disques prêts.",
+                              button: "Ouvrir Notifications") { model.openNotificationSettings() })
+        }
+        return items
+    }
+
+    var body: some View {
+        let items = self.items
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(items.count == 1 ? "1 réglage à faire sur ce Mac" : "\(items.count) réglages à faire sur ce Mac",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.headline).foregroundStyle(.red)
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: item.icon).foregroundStyle(.red).frame(width: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title).fontWeight(.semibold)
+                            Text(item.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Button(item.button, action: item.action)
+                            .buttonStyle(.borderedProminent).tint(.red)
+                            .disabled(item.id == "helper" && model.helper.isInstalling)
+                    }
                 }
-                .controlSize(.small)
             }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.red.opacity(0.6)))
         }
     }
 }
@@ -261,26 +309,6 @@ struct SuggestionsCard: View {
 
 private extension String {
     var abbreviated: String { (self as NSString).abbreviatingWithTildeInPath }
-}
-
-/// Configuration unique : après elle, Prepare Disk ne demande plus jamais le mot de passe administrateur.
-struct HelperBanner: View {
-    @Bindable var model: AppModel
-
-    var body: some View {
-        let helper = model.helper
-        if !helper.isReady {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Banner(text: "Configuration unique : avec votre mot de passe une dernière fois, Prepare Disk ne le demandera plus jamais (préparation des disques, rangement des installateurs).",
-                           color: .purple, icon: "key.fill")
-                    if helper.isInstalling { ProgressView().controlSize(.small) }
-                    else { Button("Configurer") { Task { await helper.install() } }.buttonStyle(.borderedProminent) }
-                }
-                if let error = helper.error { Text(error).font(.caption).foregroundStyle(.red) }
-            }
-        }
-    }
 }
 
 extension Color {

@@ -488,8 +488,6 @@ private struct SummaryStep: View {
         let plan = model.preparer.plan()
         let disks = model.disks.disks.filter { model.selectedDisks.contains($0.id) }
         VStack(alignment: .leading, spacing: 16) {
-            FullDiskAccessBanner(model: model)
-            HelperBanner(model: model)
             ForEach(plan.blocked, id: \.self) { Banner(text: $0, color: .red, icon: "nosign") }
             ForEach(plan.warnings, id: \.self) { Banner(text: $0) }
 
@@ -557,7 +555,6 @@ struct RunView: View {
         let preparer = model.preparer
         VStack(alignment: .leading, spacing: 16) {
             header
-            if case .finished(success: false) = preparer.phase { FullDiskAccessBanner(model: model) }
 
             if !preparer.runDownloads.isEmpty {
                 Card(title: "Téléchargements", icon: "arrow.down.circle") {

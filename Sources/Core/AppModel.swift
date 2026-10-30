@@ -1,5 +1,6 @@
 import AppKit
 import ServiceManagement
+import UserNotifications
 import Foundation
 import Observation
 
@@ -24,7 +25,7 @@ final class AppModel {
     var selectedDisks: Set<String> = []
     /// Nouvelles versions trouvées par rapport à la sélection.
     var updateNotices: [String] = []
-    var page: Page = .prepare
+    var page: Page = .versions   // l'app démarre toujours sur Versions validées
     /// Étape en cours de l'assistant « Préparer un disque ».
     var wizardStep = 0
     /// Sans « Accès complet au disque », createinstallmedia échoue (« The bless of the installer disk failed »).
@@ -51,6 +52,8 @@ final class AppModel {
         await updater.check(silently: true)
         if updater.state == .available { await updater.install() }
         await helper.check()
+        registerAgent()
+        await refreshSetup()
         // Puis les versions validées publiées par l'administrateur.
         await syncValidated(notify: false)
         notifier.requestAuthorization()
@@ -162,6 +165,33 @@ final class AppModel {
         notifier.notify("Anciennes versions supprimées", names.joined(separator: "\n"))
     }
 
+    // MARK: Réglages Système à faire (bandeau rouge en haut de l'app)
+
+    /// État de l'agent (icône de la barre des menus, téléchargements app fermée).
+    var agentStatus: SMAppService.Status = .notRegistered
+    var notificationsDenied = false
+
+    /// L'agent est toujours enregistré : l'icône de la barre des menus doit être là sur chaque Mac.
+    func registerAgent() {
+        let agent = SMAppService.agent(plistName: Agent.plist)
+        if agent.status != .enabled { try? agent.register() }
+        agentStatus = agent.status
+    }
+
+    /// Revérifie tout ce que l'utilisateur doit autoriser ; le bandeau disparaît dès que c'est fait.
+    func refreshSetup() async {
+        hasFullDiskAccess = Self.checkFullDiskAccess()
+        agentStatus = SMAppService.agent(plistName: Agent.plist).status
+        notificationsDenied = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
+        if !helper.isReady && !helper.isInstalling { await helper.check() }
+    }
+
+    func openLoginItemsSettings() { SMAppService.openSystemSettingsLoginItems() }
+
+    func openNotificationSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(Bundle.main.bundleIdentifier ?? "")")!)
+    }
+
     // MARK: Accès complet au disque
 
     /// Le fichier TCC.db n'est lisible qu'avec l'accès complet au disque.
@@ -264,21 +294,8 @@ final class AppModel {
     private var autoAttempts: [String: (date: Date, failures: Int)] = [:]
     /// Attente avant de relancer après 1, 2, 3… échecs : 5 min, 30 min, 2 h, puis 6 h.
     private static let backoff: [TimeInterval] = [5 * 60, 30 * 60, 2 * 3600, 6 * 3600]
-    /// Message si l'ouverture à la session demande une validation dans Réglages Système.
-    var loginItemNote: String?
-
     func setAutoDownload(_ on: Bool) {
         settings.autoDownload = on
-        // Sur un Mac de production, l'app doit tourner sans qu'on l'ouvre : ouverture à la session.
-        // Agent d'arrière-plan : télécharge même quand l'app est fermée (ouverture de session, puis toutes les 15 min).
-        let agent = SMAppService.agent(plistName: Agent.plist)
-        do {
-            if on { try agent.register() } else { try agent.unregister() }
-            loginItemNote = agent.status == .requiresApproval
-                ? "Autorisez Prepare Disk dans Réglages Système › Général › Ouverture (« Autoriser en arrière-plan »)." : nil
-        } catch {
-            loginItemNote = on ? "Agent d'arrière-plan impossible à activer : \(error.localizedDescription)" : nil
-        }
         if on { autoDownloadTick() }
     }
 
@@ -330,6 +347,7 @@ final class AppModel {
                     await self.refreshFirmwares()
                     self.checkForUpdates(notify: true)
                 }
+                await self.refreshSetup()
                 // Même fenêtre en arrière-plan (Mac de production) : la page reste à jour toute seule.
                 if !self.library.isScanning { await self.library.scan() }
                 self.autoDownloadTick()
@@ -356,7 +374,7 @@ final class AppModel {
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.hasFullDiskAccess = AppModel.checkFullDiskAccess()
+                await self.refreshSetup()
                 if !self.library.isScanning && !self.preparer.isRunning { await self.library.scan() }
             }
         }
