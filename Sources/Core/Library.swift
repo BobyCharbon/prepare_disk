@@ -416,7 +416,9 @@ final class Library {
         didSet { defaults.set(Array(certified), forKey: "certifiedFiles") }
     }
     var checking: Set<String> = []
-    var corrupted: Set<String> = []
+    /// Fichiers jugés abîmés, retenus par empreinte : un fichier qui change (copie terminée, nouveau
+    /// téléchargement) est revérifié au lieu de rester « abîmé » pour toujours.
+    private var corrupted: Set<String> = []
     private var isCertifying = false
 
     /// Empreinte d'un fichier (ou, pour un installateur, de son image système) : taille et date.
@@ -427,14 +429,26 @@ final class Library {
     }
 
     func certification(_ path: String) -> Certification {
-        if corrupted.contains(path) { return .corrupted }
         if checking.contains(path) { return .checking }
-        return certified.contains(fingerprint(path)) ? .certified : .unknown
+        let print = fingerprint(path)
+        if certified.contains(print) { return .certified }
+        return corrupted.contains(print) ? .corrupted : .unknown
     }
 
     func markCertified(_ path: String) {
-        corrupted.remove(path)
-        certified.insert(fingerprint(path))
+        let print = fingerprint(path)
+        corrupted.remove(print)
+        certified.insert(print)
+    }
+
+    /// Fichier modifié il y a moins d'une minute : sans doute encore en cours de copie, on attend avant de le juger.
+    private func isSettling(_ path: String) -> Bool {
+        let target = path.hasSuffix(".app") ? path + "/Contents/SharedSupport/SharedSupport.dmg" : path
+        return Date().timeIntervalSince(modificationDate(target)) < 60
+    }
+
+    private func markCorrupted(_ path: String) {
+        corrupted.insert(fingerprint(path))
     }
 
     /// Installateur certifié : version et build lus dans son image système (donc lisible), image présente,
@@ -458,26 +472,28 @@ final class Library {
     /// Vérifie, un par un et en arrière-plan, les fichiers pas encore certifiés.
     func certifyPending() async {
         guard !isCertifying else { return }
+        // Certifications faites par l'autre processus (l'app ou l'icône de la barre des menus).
+        certified.formUnion(defaults.stringArray(forKey: "certifiedFiles") ?? [])
         isCertifying = true
         defer { isCertifying = false }
-        for item in installers where certification(item.path) == .unknown {
+        for item in installers where certification(item.path) == .unknown && !isSettling(item.path) {
             checking.insert(item.path)
             let ok = await certifyInstaller(item)
             checking.remove(item.path)
-            if !ok { corrupted.insert(item.path) }
+            if !ok { markCorrupted(item.path) }
         }
         guard let catalog else { return }
         var ipsws = macIPSWs.map { ($0, catalog.firmwares[settings.macIdentifier]?.first(where: $0.matches)) }
         for device in settings.devices {
             ipsws += (iPadIPSWs[device.name] ?? []).map { ($0, catalog.firmwares[device.identifier]?.first(where: $0.matches)) }
         }
-        for (file, firmware) in ipsws where file.path.hasSuffix(".ipsw") && certification(file.path) == .unknown {
+        for (file, firmware) in ipsws where file.path.hasSuffix(".ipsw") && certification(file.path) == .unknown && !isSettling(file.path) {
             // Firmware pas encore connu (catalogue d'Apple pas chargé) : on attend, sauf archive illisible.
             if firmware == nil && file.build != nil { continue }
             checking.insert(file.path)
             let ok = await certifyIPSW(file, firmware)
             checking.remove(file.path)
-            if ok { markCertified(file.path) } else { corrupted.insert(file.path) }
+            if ok { markCertified(file.path) } else { markCorrupted(file.path) }
         }
     }
 
