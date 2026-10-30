@@ -29,9 +29,14 @@ final class Updater {
     var currentNotes: String {
         guard let url = Bundle.main.url(forResource: "CHANGELOG", withExtension: "md"),
               let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
+        return Self.notes(in: text, version: currentVersion)
+    }
+
+    /// Les lignes de la section « ## version — date » d'un CHANGELOG.
+    static func notes(in changelog: String, version: String) -> String {
         var lines: [String] = [], inSection = false
-        for line in text.components(separatedBy: "\n") {
-            if line.hasPrefix("## ") { inSection = line.dropFirst(3).hasPrefix(currentVersion + " ") || line == "## " + currentVersion; continue }
+        for line in changelog.components(separatedBy: "\n") {
+            if line.hasPrefix("## ") { inSection = line.dropFirst(3).hasPrefix(version + " ") || line == "## " + version; continue }
             if inSection, !line.isEmpty { lines.append(line) }
         }
         return lines.joined(separator: "\n")
@@ -40,26 +45,30 @@ final class Updater {
     /// Regarde la dernière version publiée. `silently` : pas d'erreur affichée (vérification au lancement).
     func check(silently: Bool = false) async {
         state = .checking
-        struct Response: Decodable {
-            let tag_name: String
-            let body: String?
-            let assets: [Asset]
-            struct Asset: Decodable { let name: String; let browser_download_url: URL }
-        }
-        guard let url = URL(string: "https://api.github.com/repos/\(Self.repository)/releases/latest"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
-              let response = try? JSONDecoder().decode(Response.self, from: data),
-              let asset = response.assets.first(where: { $0.name.hasSuffix(".zip") }) else {
+        // Liens publics de GitHub (pas l'API, limitée à 60 requêtes par heure pour tous les Mac d'un même réseau) :
+        // « releases/latest » redirige vers la page de la dernière version, dont l'adresse finit par « v1.2.3 ».
+        var head = URLRequest(url: URL(string: "https://github.com/\(Self.repository)/releases/latest")!)
+        head.httpMethod = "HEAD"
+        head.cachePolicy = .reloadIgnoringLocalCacheData
+        guard let (_, response) = try? await URLSession.shared.data(for: head),
+              let tag = response.url?.lastPathComponent, tag.hasPrefix("v"),
+              let download = URL(string: "https://github.com/\(Self.repository)/releases/download/\(tag)/PrepareDisk.zip") else {
             state = silently ? .idle : .failed("Impossible de lire les versions sur GitHub.")
             return
         }
-        let version = response.tag_name.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+        let version = String(tag.dropFirst())
         guard version.isNewerVersion(than: currentVersion) else {
             release = nil
             state = silently ? .idle : .upToDate
             return
         }
-        release = Release(version: version, notes: response.body ?? "", download: asset.browser_download_url)
+        // Les nouveautés : la section de cette version dans le CHANGELOG publié.
+        var notes = ""
+        if let url = URL(string: "https://raw.githubusercontent.com/\(Self.repository)/main/CHANGELOG.md"),
+           let (data, _) = try? await URLSession.shared.data(from: url) {
+            notes = Self.notes(in: String(decoding: data, as: UTF8.self), version: version)
+        }
+        release = Release(version: version, notes: notes, download: download)
         state = .available
     }
 

@@ -42,7 +42,7 @@ final class ValidatedStore {
     var error: String?
     var isPublishing = false
     /// Un jeton GitHub avec droit d'écriture est enregistré dans le trousseau.
-    var hasToken: Bool
+    var hasToken: Bool { didSet { defaults.set(hasToken, forKey: "adminHasToken") } }
     /// Interrupteur du mode administrateur (en un clic, une fois le jeton enregistré).
     var adminMode: Bool { didSet { defaults.set(adminMode, forKey: "adminMode") } }
     /// Mode administrateur : on choisit librement ses versions, et on peut les publier pour tous.
@@ -50,7 +50,9 @@ final class ValidatedStore {
 
     init() {
         published = defaults.data(forKey: "validatedVersions").flatMap { try? JSONDecoder().decode(ValidatedVersions.self, from: $0) }
-        hasToken = Keychain.read() != nil
+        // Pas de lecture du trousseau au démarrage (macOS demanderait le mot de passe de session) :
+        // on retient seulement qu'un jeton est enregistré, il n'est lu qu'au moment de publier.
+        hasToken = defaults.bool(forKey: "adminHasToken")
         adminMode = defaults.bool(forKey: "adminMode")
     }
 
@@ -59,14 +61,17 @@ final class ValidatedStore {
         request.httpMethod = method
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue(accept, forHTTPHeaderField: "Accept")
-        if let token = Keychain.read() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if method != "GET", let token = Keychain.read() { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return request
     }
 
     /// Relit la liste publiée. Renvoie true si elle a changé.
     @discardableResult
     func fetch() async -> Bool {
-        guard let (data, response) = try? await URLSession.shared.data(for: request(accept: "application/vnd.github.raw")),
+        // Fichier public (pas l'API GitHub, limitée par adresse IP) ; jeton inutile pour lire.
+        var get = URLRequest(url: URL(string: "https://raw.githubusercontent.com/\(Updater.repository)/main/\(Self.path)")!)
+        get.cachePolicy = .reloadIgnoringLocalCacheData
+        guard let (data, response) = try? await URLSession.shared.data(for: get),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let list = try? JSONDecoder().decode(ValidatedVersions.self, from: data) else {
             error = "Impossible de lire les versions validées (hors ligne ?)."
