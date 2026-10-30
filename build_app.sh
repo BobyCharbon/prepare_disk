@@ -45,8 +45,10 @@ else
     echo "ATTENTION : aucun certificat dans le trousseau, signature ad hoc."
     codesign --force --sign - "$APP"
 fi
-# Notarisation par Apple (NOTARIZE=1, pour les versions publiées) : une app téléchargée s'ouvre alors
-# sans aucun avertissement. Clé d'API App Store Connect : variables NOTARY_*, ou fichiers de ~/PrepareDisk_signing.
+# Notarisation par Apple : une app téléchargée s'ouvre sans avertissement, et macOS accepte de lancer l'agent
+# de la barre des menus (sinon il le tue : OS_REASON_CODESIGNING). Faite dès que la clé d'API est disponible
+# (variables NOTARY_*, ou fichiers de ~/PrepareDisk_signing) ; NOTARIZE=0 pour s'en passer.
+if [ -z "${NOTARIZE:-}" ] && ls ~/PrepareDisk_signing/AuthKey_*.p8 >/dev/null 2>&1; then NOTARIZE=1; fi
 if [ "${NOTARIZE:-0}" = 1 ] && [ -n "$DEVELOPER_ID" ]; then
     KEY="${NOTARY_KEY_PATH:-$(ls ~/PrepareDisk_signing/AuthKey_*.p8 2>/dev/null | head -1)}"
     KEY_ID="${NOTARY_KEY_ID:-$(cat ~/PrepareDisk_signing/notary-key-id.txt 2>/dev/null)}"

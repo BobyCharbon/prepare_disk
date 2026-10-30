@@ -9,7 +9,6 @@
     <!-- Icône dans la barre des menus : lancée à l'ouverture de session et relancée si elle s'arrête. -->
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
-    <key>LimitLoadToSessionType</key><string>Aqua</string>
     <key>ProcessType</key><string>Interactive</string>
 </dict>
 </plist>

@@ -227,7 +227,7 @@ struct SetupChecklist: View {
         if model.agentStatus == .requiresApproval || model.agentStatus == .notRegistered {
             items.append(Item(id: "agent", icon: "menubar.rectangle", title: "Autoriser en arrière-plan",
                               detail: "Nécessaire pour l'icône dans la barre des menus et le téléchargement automatique quand l'app est fermée. Activez Prepare Disk dans « Autoriser en arrière-plan ».",
-                              button: "Ouvrir Ouverture et extensions") { model.registerAgent(); model.openLoginItemsSettings() })
+                              button: "Ouvrir Ouverture et extensions") { Task { await model.registerAgent() }; model.openLoginItemsSettings() })
         }
         if model.notificationsDenied {
             items.append(Item(id: "notif", icon: "bell.slash.fill", title: "Notifications désactivées",

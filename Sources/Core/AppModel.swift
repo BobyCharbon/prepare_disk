@@ -52,7 +52,7 @@ final class AppModel {
         await updater.check(silently: true)
         if updater.state == .available { await updater.install() }
         await helper.check()
-        registerAgent()
+        await registerAgent()
         await refreshSetup()
         // Puis les versions validées publiées par l'administrateur.
         await syncValidated(notify: false)
@@ -171,10 +171,22 @@ final class AppModel {
     var agentStatus: SMAppService.Status = .notRegistered
     var notificationsDenied = false
 
-    /// L'agent est toujours enregistré : l'icône de la barre des menus doit être là sur chaque Mac.
-    func registerAgent() {
+    /// L'agent est installé d'office : l'icône de la barre des menus doit être là sur chaque Mac.
+    /// Si l'app a été déplacée (ou remplacée ailleurs), on le réenregistre, sinon macOS cherche l'ancienne copie.
+    func registerAgent() async {
         let agent = SMAppService.agent(plistName: Agent.plist)
-        if agent.status != .enabled { try? agent.register() }
+        let path = Bundle.main.bundlePath
+        if UserDefaults.standard.string(forKey: "agentRegisteredPath") != path {
+            try? await agent.unregister()
+        }
+        if agent.status != .enabled {
+            do {
+                try agent.register()
+                UserDefaults.standard.set(path, forKey: "agentRegisteredPath")
+            } catch {
+                log.add("ATTENTION : agent de la barre des menus non installé : \(error.localizedDescription)")
+            }
+        }
         agentStatus = agent.status
     }
 
