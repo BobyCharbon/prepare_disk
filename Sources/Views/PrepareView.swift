@@ -495,6 +495,7 @@ private struct SummaryStep: View {
         let disks = model.disks.disks.filter { model.selectedDisks.contains($0.id) }
         VStack(alignment: .leading, spacing: 16) {
             FullDiskAccessBanner(model: model)
+            HelperBanner(model: model)
             ForEach(plan.blocked, id: \.self) { Banner(text: $0, color: .red, icon: "nosign") }
             ForEach(plan.warnings, id: \.self) { Banner(text: $0) }
 

@@ -262,3 +262,23 @@ struct SuggestionsCard: View {
 private extension String {
     var abbreviated: String { (self as NSString).abbreviatingWithTildeInPath }
 }
+
+/// Configuration unique : après elle, Prepare Disk ne demande plus jamais le mot de passe administrateur.
+struct HelperBanner: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        let helper = model.helper
+        if !helper.isReady {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Banner(text: "Configuration unique : avec votre mot de passe une dernière fois, Prepare Disk ne le demandera plus jamais (préparation des disques, rangement des installateurs).",
+                           color: .purple, icon: "key.fill")
+                    if helper.isInstalling { ProgressView().controlSize(.small) }
+                    else { Button("Configurer") { Task { await helper.install() } }.buttonStyle(.borderedProminent) }
+                }
+                if let error = helper.error { Text(error).font(.caption).foregroundStyle(.red) }
+            }
+        }
+    }
+}

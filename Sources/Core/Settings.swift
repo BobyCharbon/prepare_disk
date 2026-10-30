@@ -57,6 +57,8 @@ final class AppSettings {
     var removeOldOnUpdate: Bool { didSet { defaults.set(removeOldOnUpdate, forKey: "removeOldOnUpdate") } }
     /// Après un téléchargement, met à la corbeille les anciennes versions remplacées dans ~/prepare_disk.
     var removeOldVersions: Bool { didSet { defaults.set(removeOldVersions, forKey: "removeOldVersions") } }
+    /// Télécharge tout seul les versions validées (Mac de production).
+    var autoDownload: Bool { didSet { defaults.set(autoDownload, forKey: "autoDownload") } }
 
     init() {
         let d = UserDefaults.standard
@@ -77,6 +79,7 @@ final class AppSettings {
         verifyChecksums = bool("verifyChecksums", true)
         removeOldOnUpdate = bool("removeOldOnUpdate", true)
         removeOldVersions = bool("removeOldVersions", true)
+        autoDownload = bool("autoDownload", false)
         clearStalePins()
     }
 

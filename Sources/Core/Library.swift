@@ -103,6 +103,8 @@ final class Library {
     var moveError: String?
     /// Pour reconnaître un IPSW au nom d'origine d'Apple.
     weak var catalog: Catalog?
+    /// Assistant système : déplace les installateurs à root sans mot de passe, une fois configuré.
+    var helper: Helper?
 
     /// Fichiers que l'utilisateur a choisi de laisser où ils sont.
     private var dismissed: Set<String> {
@@ -370,7 +372,12 @@ final class Library {
                 protected.append((path, destination))
             }
         }
-        if !protected.isEmpty {
+        if !protected.isEmpty, let helper, helper.isReady {
+            for (path, destination) in protected { _ = await helper.run(["move", path, destination]) }
+            for (path, destination) in protected where !FileManager.default.fileExists(atPath: destination) {
+                errors.append("impossible de ranger « \((path as NSString).lastPathComponent) »")
+            }
+        } else if !protected.isEmpty {
             let command = protected.map { "/bin/mv -n \(Shell.quote($0.path)) \(Shell.quote($0.destination))" }.joined(separator: " ; ")
             let result = await Shell.runAsAdmin(command)
             for (path, destination) in protected where !FileManager.default.fileExists(atPath: destination) {

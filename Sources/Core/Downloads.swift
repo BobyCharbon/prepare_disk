@@ -71,6 +71,8 @@ final class DownloadManager {
     /// Téléchargements simultanés (un seul macOS à la fois : softwareupdate ne sait pas en faire deux).
     static let maxParallel = 3
     private var runningCount = 0
+    /// Empêche la mise en veille tant qu'un téléchargement tourne.
+    private var awake: NSObjectProtocol?
     private var succeededSinceIdle = false
 
     init(settings: AppSettings, library: Library, notifier: Notifier) {
@@ -107,6 +109,10 @@ final class DownloadManager {
     /// Lance les téléchargements en attente, jusqu'à `maxParallel` à la fois.
     private func schedule() {
         while runningCount < Self.maxParallel, let job = nextJob() {
+            if awake == nil {
+                awake = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .userInitiated],
+                                                              reason: "Téléchargement des versions validées")
+            }
             runningCount += 1
             job.state = .running
             Task {
@@ -114,6 +120,7 @@ final class DownloadManager {
                 runningCount -= 1
                 schedule()
                 if runningCount == 0 {
+                    if let awake { ProcessInfo.processInfo.endActivity(awake); self.awake = nil }
                     notifier.setDockProgress(nil)
                     await library.scan()
                     if succeededSinceIdle { succeededSinceIdle = false; await onFinished?() }

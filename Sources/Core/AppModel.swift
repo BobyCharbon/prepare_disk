@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import Foundation
 import Observation
 
@@ -17,6 +18,7 @@ final class AppModel {
     let preparer: Preparer
     let updater = Updater()
     let validated = ValidatedStore()
+    let helper = Helper()
 
     /// Disques cochés dans l'assistant.
     var selectedDisks: Set<String> = []
@@ -33,18 +35,21 @@ final class AppModel {
         self.settings = settings
         library = Library(settings: settings)
         library.catalog = catalog
+        library.helper = helper
         notifier = Notifier(settings: settings)
         downloads = DownloadManager(settings: settings, library: library, notifier: notifier)
         disks = DiskStore(settings: settings, catalog: catalog, library: library)
         preparer = Preparer(settings: settings, catalog: catalog, library: library, downloads: downloads,
                             disks: disks, history: history, log: log, notifier: notifier)
         downloads.onFinished = { [weak self] in await self?.removeOldVersions() }
+        preparer.helper = helper
     }
 
     func start() async {
         // L'app doit toujours être à jour : au lancement rien n'est en cours, on installe tout de suite.
         await updater.check(silently: true)
         if updater.state == .available { await updater.install() }
+        await helper.check()
         // Puis les versions validées publiées par l'administrateur.
         await syncValidated(notify: false)
         notifier.requestAuthorization()
@@ -61,6 +66,7 @@ final class AppModel {
         autoRefresh()
         await library.scan()   // reconnaît les IPSW au nom d'Apple, maintenant que la liste est chargée
         if settings.checkUpdatesAtLaunch { checkForUpdates(notify: true) }
+        autoDownloadTick()
     }
 
     func refreshAll() async {
@@ -190,6 +196,7 @@ final class AppModel {
                                 "macOS " + list.macOS.filter { !$0.isEmpty }.joined(separator: ", ") + ". Ouvrez Versions validées pour les télécharger.")
             }
             checkForUpdates(notify: false)
+            autoDownloadTick()
         }
     }
 
@@ -201,6 +208,84 @@ final class AppModel {
 
     func publishValidated() async -> String? {
         await validated.publish(ValidatedVersions(from: settings))
+    }
+
+    // MARK: Bilan des versions validées
+
+    /// Un élément validé et coché : sur ce Mac au bon endroit, sur ce Mac ailleurs, ou à télécharger.
+    struct Needed: Identifiable {
+        enum State { case ok, misplaced, missing }
+        let label: String
+        let state: State
+        var download: DownloadJob.Kind?
+        var id: String { label }
+    }
+
+    func validatedChecklist() -> [Needed] {
+        func inFolder(_ path: String?, _ folder: String) -> Needed.State {
+            guard let path else { return .missing }
+            return path.hasPrefix(folder + "/") ? .ok : .misplaced
+        }
+        var items: [Needed] = []
+        for version in settings.selected where !version.isEmpty {
+            let state = inFolder(library.installer(for: version, build: catalog.installer(version: version)?.build)?.path, settings.intelFolder)
+            items.append(Needed(label: "macOS \(version)", state: state,
+                                download: state == .missing ? catalog.installer(version: version).map { .macOS($0) } : nil))
+        }
+        if settings.includeMacIPSW {
+            for (slot, version) in settings.selected.enumerated() where !version.isEmpty && settings.macIPSWSlots[slot] {
+                guard let fw = catalog.macFirmware(identifier: settings.macIdentifier, version: version,
+                                                   pinned: settings.macIPSWVersions[slot]), fw.signed else { continue }
+                let state = inFolder(library.ipsw(fw, device: nil)?.path, settings.siliconFolder)
+                items.append(Needed(label: "IPSW Mac \(fw.version)", state: state,
+                                    download: state == .missing ? .ipsw(fw, destination: settings.macIPSWPath(fw.version)) : nil))
+            }
+        }
+        if settings.includeIPadIPSW {
+            for device in settings.enabledDevices {
+                guard let fw = catalog.iPadFirmware(device), fw.signed else { continue }
+                let local = library.ipsw(fw, device: device)
+                let state = inFolder(local?.path, settings.folder(for: device))
+                items.append(Needed(label: "\(device.name) \(fw.version)", state: state,
+                                    download: state == .missing ? .ipsw(fw, destination: settings.ipswPath(device, fw.version)) : nil))
+            }
+        }
+        if settings.includeLoops {
+            items.append(Needed(label: "Loops GarageBand", state: library.loops.isEmpty ? .missing : .ok))
+        }
+        return items
+    }
+
+    // MARK: Téléchargement automatique
+
+    /// Dernier lancement automatique de chaque téléchargement (pour ne pas relancer en boucle un échec).
+    private var autoAttempts: [String: Date] = [:]
+    /// Message si l'ouverture à la session demande une validation dans Réglages Système.
+    var loginItemNote: String?
+
+    func setAutoDownload(_ on: Bool) {
+        settings.autoDownload = on
+        // Sur un Mac de production, l'app doit tourner sans qu'on l'ouvre : ouverture à la session.
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            loginItemNote = SMAppService.mainApp.status == .requiresApproval
+                ? "Autorisez Prepare Disk dans Réglages Système › Général › Ouverture pour qu'il démarre tout seul." : nil
+        } catch {
+            loginItemNote = on ? "Ouverture automatique à la session impossible : \(error.localizedDescription)" : nil
+        }
+        if on { autoDownloadTick() }
+    }
+
+    /// Met en téléchargement tout ce qui manque. Un échec est retenté toutes les 2 minutes, sans fin.
+    func autoDownloadTick() {
+        guard settings.autoDownload, !preparer.isRunning else { return }
+        for kind in validatedChecklist().compactMap(\.download) {
+            let key = DownloadJob(kind: kind).key
+            if downloads.active.contains(where: { $0.key == key }) { continue }
+            if let last = autoAttempts[key], Date().timeIntervalSince(last) < 120 { continue }
+            autoAttempts[key] = Date()
+            downloads.enqueue(kind)
+        }
     }
 
     // MARK: Actualisation automatique
@@ -219,7 +304,7 @@ final class AppModel {
                     await self.updater.check(silently: true)
                     if self.updater.state == .available && self.downloads.active.isEmpty { await self.updater.install() }
                 }
-                if Date().timeIntervalSince(lastValidated) > 30 * 60 {
+                if Date().timeIntervalSince(lastValidated) > 5 * 60 {
                     lastValidated = Date()
                     await self.syncValidated(notify: true)
                 }
@@ -229,7 +314,9 @@ final class AppModel {
                     await self.refreshFirmwares()
                     self.checkForUpdates(notify: true)
                 }
-                if NSApp.isActive && !self.library.isScanning { await self.library.scan() }
+                // Même fenêtre en arrière-plan (Mac de production) : la page reste à jour toute seule.
+                if !self.library.isScanning { await self.library.scan() }
+                self.autoDownloadTick()
             }
         }
     }

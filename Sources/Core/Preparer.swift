@@ -71,6 +71,8 @@ final class Preparer {
     var runDownloads: [DownloadJob] = []
     var checks: [String: [CheckResult]] = [:]   // disque → vérifications
     var stopRequested = false
+    /// Assistant système : une fois configuré, le script tourne sans mot de passe.
+    var helper: Helper?
     private var stopFile: URL?
 
     init(settings: AppSettings, catalog: Catalog, library: Library, downloads: DownloadManager,
@@ -373,7 +375,15 @@ final class Preparer {
                 try? await Task.sleep(for: .milliseconds(400))
             }
         }
-        let result = await Shell.runAsAdmin("/bin/bash \(Shell.quote(scriptURL.path)) > \(Shell.quote(logURL.path)) 2>&1")
+        let command = "/bin/bash \(Shell.quote(scriptURL.path)) > \(Shell.quote(logURL.path)) 2>&1"
+        let result: (cancelled: Bool, output: String)
+        if let helper, helper.isReady {
+            // Le script tourne sous le compte de l'utilisateur ; seules ses étapes « priv » passent par l'assistant.
+            _ = await Shell.run("/bin/bash", ["-c", command])
+            result = (false, "")
+        } else {
+            result = await Shell.runAsAdmin(command)
+        }
         tail.cancel()
         readLog()
         log.ingest("\n")
@@ -449,16 +459,15 @@ struct ScriptBuilder {
         line("RC=0")
         step("\(disk) : effacement et partitionnement")
         let parts = plan.systems.enumerated().map { "JHFS+ OS\($0.offset + 1) \($0.element.partitionGB)g" }.joined(separator: " ")
-        line("diskutil unmountDisk force \(dev)")
-        line("diskutil partitionDisk \(dev) GPT \(parts) JHFS+ DataExternalDrive 0b || return 1")
+        line("priv erase \(disk) \(parts) JHFS+ DataExternalDrive 0b || return 1")
         for (i, system) in plan.systems.enumerated() {
             guard let app = system.local else { continue }
             step("\(disk) : création de l'installateur macOS \(system.installer.name) \(system.installer.version)")
             line("PART=$(part_named \(disk) OS\(i + 1)); VOL=$(mount_of \"$PART\")")
             // Une étape ratée n'empêche pas les suivantes : les autres macOS et les fichiers sont quand même écrits.
             line("if [ -z \"$VOL\" ]; then echo \"ERREUR : partition OS\(i + 1) introuvable\"; RC=1")
-            line("elif \(Shell.quote(app.createInstallMedia)) --volume \"$VOL\" --nointeraction; then")
-            line("    diskutil rename \"$PART\" \(Shell.quote(system.installer.volumeLabel))")
+            line("elif priv createinstallmedia \(Shell.quote(app.path)) \"$VOL\"; then")
+            line("    priv rename \"$PART\" \(Shell.quote(system.installer.volumeLabel))")
             line("else echo \(Shell.quote("ERREUR : createinstallmedia a échoué pour " + system.installer.version)); RC=1; fi")
         }
         copy(disk: disk, items: plan.dataItems, data: "$(part_named \(disk) DataExternalDrive)")
@@ -474,8 +483,8 @@ struct ScriptBuilder {
         for (part, installer, app) in systems {
             step("\(disk) : remplacement de « \(part.name) » par macOS \(installer.name) \(installer.version)")
             line("VOL=$(mount_of \(part.id)); [ -z \"$VOL\" ] && diskutil mount \(part.id) >/dev/null && VOL=$(mount_of \(part.id))")
-            line("if \(Shell.quote(app.createInstallMedia)) --volume \"$VOL\" --nointeraction; then")
-            line("    diskutil rename \(part.id) \(Shell.quote(installer.volumeLabel))")
+            line("if priv createinstallmedia \(Shell.quote(app.path)) \"$VOL\"; then")
+            line("    priv rename \(part.id) \(Shell.quote(installer.volumeLabel))")
             line("else echo \"ERREUR : createinstallmedia a échoué pour \(installer.version)\"; RC=1; fi")
         }
         if let dataPartition {
@@ -513,6 +522,18 @@ struct ScriptBuilder {
             done
         }
         check_stop() { [ -f \(Shell.quote(stopFile)) ] && { echo "ATTENTION : arrêt demandé"; exit 3; }; }
+        # Opérations root : en direct si le script tourne en root, sinon par l'assistant (sans mot de passe).
+        priv() {
+            if [ "$(id -u)" = 0 ]; then
+                case "$1" in
+                    erase) d="$2"; shift 2; diskutil unmountDisk force "/dev/$d"; diskutil partitionDisk "/dev/$d" GPT "$@" ;;
+                    createinstallmedia) "$2/Contents/Resources/createinstallmedia" --volume "$3" --nointeraction ;;
+                    rename) diskutil rename "$2" "$3" ;;
+                esac
+            else
+                sudo -n \(Shell.quote(Helper.path)) "$@"
+            fi
+        }
 
         \(body)
         echo "@@END $FAILED"

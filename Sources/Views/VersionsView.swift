@@ -9,20 +9,28 @@ struct VersionsView: View {
         let settings = model.settings
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                let items = checklist()
+                let items = model.validatedChecklist()
                 let toDownload = items.compactMap(\.download)
                 HStack(alignment: .top) {
                     Text("Les versions validées par l'entreprise. Dès qu'une nouvelle version est validée, changez-la ici : elle sert à préparer les disques et à les comparer.")
                         .foregroundStyle(.secondary)
                     Spacer()
+                    VStack(alignment: .trailing, spacing: 6) {
+                    Toggle("Téléchargement automatique", isOn: Binding(get: { model.settings.autoDownload },
+                                                                        set: { model.setAutoDownload($0) }))
+                        .toggleStyle(.switch)
+                        .help("Télécharge tout seul les versions validées dès qu'elles changent, recommence en cas d'échec et garde le Mac éveillé. Idéal pour les Mac de production.")
+                    if let note = model.loginItemNote { Text(note).font(.caption).foregroundStyle(.orange) }
                     Button { toDownload.forEach { model.downloads.enqueue($0) } } label: {
                         Label(toDownload.isEmpty ? "Tout est téléchargé" : "Tout télécharger (\(toDownload.count))", systemImage: "arrow.down.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(toDownload.isEmpty)
                     .help("Télécharge tout ce qui manque et le range dans ~/prepare_disk. Un téléchargement raté recommence tout seul.")
+                    }
                 }
                 ValidatedBanner(model: model)
+                HelperBanner(model: model)
                 ForEach(model.updateNotices, id: \.self) { Banner(text: $0, color: .blue, icon: "sparkles") }
                 ForEach(model.preparer.plan().blocked, id: \.self) { Banner(text: $0, color: .red, icon: "nosign") }
 
@@ -101,56 +109,9 @@ struct VersionsView: View {
         }
     }
 
-    // MARK: Bilan
-
-    /// Un élément validé et coché : sur ce Mac au bon endroit, sur ce Mac ailleurs, ou à télécharger.
-    private struct Needed: Identifiable {
-        enum State { case ok, misplaced, missing }
-        let label: String
-        let state: State
-        var download: DownloadJob.Kind?
-        var id: String { label }
-    }
-
-    private func checklist() -> [Needed] {
-        let settings = model.settings, catalog = model.catalog, library = model.library
-        func inFolder(_ path: String?, _ folder: String) -> Needed.State {
-            guard let path else { return .missing }
-            return path.hasPrefix(folder + "/") ? .ok : .misplaced
-        }
-        var items: [Needed] = []
-        for version in settings.selected where !version.isEmpty {
-            let state = inFolder(library.installer(for: version, build: catalog.installer(version: version)?.build)?.path, settings.intelFolder)
-            items.append(Needed(label: "macOS \(version)", state: state,
-                                download: state == .missing ? catalog.installer(version: version).map { .macOS($0) } : nil))
-        }
-        if settings.includeMacIPSW {
-            for (slot, version) in settings.selected.enumerated() where !version.isEmpty && settings.macIPSWSlots[slot] {
-                guard let fw = catalog.macFirmware(identifier: settings.macIdentifier, version: version,
-                                                   pinned: settings.macIPSWVersions[slot]), fw.signed else { continue }
-                let state = inFolder(library.ipsw(fw, device: nil)?.path, settings.siliconFolder)
-                items.append(Needed(label: "IPSW Mac \(fw.version)", state: state,
-                                    download: state == .missing ? .ipsw(fw, destination: settings.macIPSWPath(fw.version)) : nil))
-            }
-        }
-        if settings.includeIPadIPSW {
-            for device in settings.enabledDevices {
-                guard let fw = catalog.iPadFirmware(device), fw.signed else { continue }
-                let local = library.ipsw(fw, device: device)
-                let state = inFolder(local?.path, settings.folder(for: device))
-                items.append(Needed(label: "\(device.name) \(fw.version)", state: state,
-                                    download: state == .missing ? .ipsw(fw, destination: settings.ipswPath(device, fw.version)) : nil))
-            }
-        }
-        if settings.includeLoops {
-            items.append(Needed(label: "Loops GarageBand", state: library.loops.isEmpty ? .missing : .ok))
-        }
-        return items
-    }
-
     /// Bandeau du bas : vert si tout est sur ce Mac et bien rangé, sinon ce qui manque.
     @ViewBuilder
-    private func summary(_ items: [Needed]) -> some View {
+    private func summary(_ items: [AppModel.Needed]) -> some View {
         let missing = items.filter { $0.state == .missing }
         let misplaced = items.filter { $0.state == .misplaced }
         let downloading = model.downloads.active.count
