@@ -1,6 +1,7 @@
 import Foundation
 import Observation
-import Security
+import CryptoKit
+import IOKit
 
 /// Versions validées, publiées dans le dépôt (validated-versions.json) et suivies par tous les Mac.
 /// "" = automatique : la version du macOS pour l'IPSW Mac, la dernière signée pour un iPad.
@@ -52,7 +53,7 @@ final class ValidatedStore {
         published = defaults.data(forKey: "validatedVersions").flatMap { try? JSONDecoder().decode(ValidatedVersions.self, from: $0) }
         // Pas de lecture du trousseau au démarrage (macOS demanderait le mot de passe de session) :
         // on retient seulement qu'un jeton est enregistré, il n'est lu qu'au moment de publier.
-        hasToken = defaults.bool(forKey: "adminHasToken")
+        hasToken = Keychain.read() != nil
         adminMode = defaults.bool(forKey: "adminMode")
     }
 
@@ -146,28 +147,35 @@ final class ValidatedStore {
     }
 }
 
-/// Le jeton GitHub de l'administrateur, dans le trousseau de session.
+/// Le jeton GitHub de l'administrateur, chiffré (AES-GCM) dans un fichier caché, lisible par ce compte seulement.
+/// Pas de trousseau : macOS y redemandait le mot de passe de session après chaque mise à jour de l'app.
+/// La clé vient de l'identifiant matériel de ce Mac : le fichier copié ailleurs est illisible.
 enum Keychain {
-    private static let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                               kSecAttrService as String: "com.bobycharbon.preparedisk",
-                                               kSecAttrAccount as String: "github-admin"]
+    private static let file = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/PrepareDisk/.admin-token")
+
+    private static var key: SymmetricKey {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        defer { IOObjectRelease(service) }
+        let uuid = IORegistryEntryCreateCFProperty(service, "IOPlatformUUID" as CFString, kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? String ?? ""
+        return SymmetricKey(data: SHA256.hash(data: Data((uuid + "|com.bobycharbon.preparedisk").utf8)))
+    }
 
     static func read() -> String? {
-        var item: CFTypeRef?
-        var search = query
-        search[kSecReturnData as String] = true
-        guard SecItemCopyMatching(search as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard let data = try? Data(contentsOf: file),
+              let box = try? AES.GCM.SealedBox(combined: data),
+              let plain = try? AES.GCM.open(box, using: key) else { return nil }
+        return String(data: plain, encoding: .utf8)
     }
 
     static func save(_ token: String) {
-        delete()
-        var item = query
-        item[kSecValueData as String] = Data(token.utf8)
-        SecItemAdd(item as CFDictionary, nil)
+        guard let sealed = try? AES.GCM.seal(Data(token.utf8), using: key).combined else { return }
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? sealed.write(to: file, options: [.atomic, .completeFileProtection])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
     }
 
     static func delete() {
-        SecItemDelete(query as CFDictionary)
+        try? FileManager.default.removeItem(at: file)
     }
 }
