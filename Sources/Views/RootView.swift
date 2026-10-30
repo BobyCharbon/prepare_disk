@@ -4,6 +4,10 @@ struct RootView: View {
     @Bindable var model: AppModel
 
     var body: some View {
+        content.overlay { MandatoryUpdateView(model: model) }
+    }
+
+    private var content: some View {
         NavigationSplitView {
             List(selection: $model.page) {
                 Section("Versions") { row(.versions) }
@@ -135,6 +139,49 @@ private struct UpdateFooter: View {
                 .padding(10)
                 .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8))
                 .padding([.horizontal, .top], 10)
+        }
+    }
+}
+
+/// Mise à jour obligatoire : pendant l'installation, et tant qu'elle n'a pas réussi, l'app est bloquée.
+private struct MandatoryUpdateView: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        let updater = model.updater
+        let blocking: Bool = switch updater.state {
+        case .downloading, .installing: updater.release != nil
+        case .failed: updater.release != nil
+        default: false
+        }
+        if blocking, let release = updater.release {
+            ZStack {
+                Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+                VStack(spacing: 14) {
+                    Image(systemName: "arrow.down.app.fill").font(.system(size: 44)).foregroundStyle(.tint)
+                    Text("Mise à jour obligatoire").font(.title2.bold())
+                    Text("Prepare Disk \(updater.currentVersion) → \(release.version)").foregroundStyle(.secondary)
+                    switch updater.state {
+                    case let .downloading(progress):
+                        ProgressView(value: progress).frame(width: 280)
+                        Text("Téléchargement de la nouvelle version…").font(.caption).foregroundStyle(.secondary)
+                    case .installing:
+                        ProgressView().controlSize(.small)
+                        Text("Installation, l'app va redémarrer…").font(.caption).foregroundStyle(.secondary)
+                    case let .failed(message):
+                        Text(message).multilineTextAlignment(.center).foregroundStyle(.red).frame(maxWidth: 420)
+                        HStack {
+                            Button("Réessayer") { Task { await updater.install() } }.buttonStyle(.borderedProminent)
+                            Link("Télécharger à la main", destination: URL(string: "https://github.com/\(Updater.repository)/releases/latest")!)
+                        }
+                    default:
+                        EmptyView()
+                    }
+                }
+                .padding(32)
+                .background(.background, in: RoundedRectangle(cornerRadius: 16))
+                .shadow(radius: 20)
+            }
         }
     }
 }

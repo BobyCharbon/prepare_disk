@@ -326,3 +326,21 @@ extension ShapeStyle where Self == LinearGradient {
         LinearGradient(colors: [.validatedGreen, .validatedBlue], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
+
+/// Espace libre sur le disque, et ce qu'il faut pour télécharger ce qui manque (en rouge si ça ne suffit pas).
+struct DiskSpaceLabel: View {
+    @Bindable var model: AppModel
+
+    var body: some View {
+        let needed = model.spaceNeeded
+        let enough = model.freeSpace >= needed
+        HStack(spacing: 4) {
+            Image(systemName: enough ? "internaldrive" : "exclamationmark.triangle.fill")
+            Text("\(model.freeSpace.fileSize) libres")
+            if needed > 0 { Text("· \(needed.fileSize) nécessaires") }
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(enough ? Color.secondary : Color.red)
+        .help(enough ? "Espace libre sur le disque de ~/prepare_disk." : "Pas assez d'espace pour tout télécharger : libérez de la place.")
+    }
+}

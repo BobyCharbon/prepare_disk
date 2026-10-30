@@ -10,16 +10,25 @@ final class Helper {
     nonisolated static let path = "/Library/PrivilegedHelperTools/com.bobycharbon.preparedisk.helper"
     /// Les fichiers de /etc/sudoers.d contenant un point sont ignorés par sudo.
     static let sudoersPath = "/etc/sudoers.d/preparedisk"
-    static let version = "1"
 
     var isReady = false
     var isInstalling = false
     var error: String?
 
-    /// L'assistant est installé, à jour, et utilisable sans mot de passe.
+    /// L'assistant est installé, à jour, et utilisable sans mot de passe. Une version plus ancienne se met
+    /// à jour toute seule depuis cette app (signée) : pas de nouvelle demande de mot de passe.
     func check() async {
+        var installed = await installedVersion()
+        if let current = installed, current != Self.version, Int(current) ?? 0 >= 3 {
+            _ = await run(["selfupdate", Bundle.main.bundlePath])
+            installed = await installedVersion()
+        }
+        isReady = installed == Self.version
+    }
+
+    private func installedVersion() async -> String? {
         let result = await Shell.run("/usr/bin/sudo", ["-n", Self.path, "version"])
-        isReady = result.status == 0 && result.output.trimmingCharacters(in: .whitespacesAndNewlines) == Self.version
+        return result.status == 0 ? result.output.trimmingCharacters(in: .whitespacesAndNewlines) : nil
     }
 
     /// Installation unique (demande le mot de passe administrateur une fois).
@@ -55,50 +64,14 @@ final class Helper {
     }
 
     /// Le script de l'assistant (bash, exécuté en root). Chaque commande vérifie ce qu'on lui demande.
-    nonisolated static let script = #"""
-    #!/bin/bash
-    # Assistant de Prepare Disk : seules ces opérations sont permises en root, sans mot de passe.
-    set -u
-    PATH=/usr/bin:/bin:/usr/sbin:/sbin
-    refuse() { echo "Assistant : refusé ($*)" >&2; exit 2; }
-    # Disque ou volume externe et physique uniquement (jamais le disque interne).
-    external() {
-        local info
-        info=$(diskutil info -plist "$1" 2>/dev/null) || return 1
-        [ "$(plutil -extract Internal raw -o - - <<<"$info" 2>/dev/null)" = "false" ]
-    }
-    # Installateur macOS dont createinstallmedia est signé par Apple.
-    installer() {
-        [[ "$(basename "$1")" == Install\ macOS*.app ]] || return 1
-        codesign --verify -R="anchor apple" "$1/Contents/Resources/createinstallmedia" 2>/dev/null
+    /// Le script de l'assistant (bash, exécuté en root), livré dans l'app signée (Resources/helper.sh).
+    nonisolated static var script: String {
+        Bundle.main.url(forResource: "helper", withExtension: "sh").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
     }
 
-    case "${1:-}" in
-        version)
-            echo 1 ;;
-        erase)
-            disk="${2:-}"
-            [[ "$disk" =~ ^disk[0-9]+$ ]] && external "$disk" || refuse "disque $disk"
-            shift 2
-            diskutil unmountDisk force "/dev/$disk"
-            exec diskutil partitionDisk "/dev/$disk" GPT "$@" ;;
-        createinstallmedia)
-            app="${2:-}"; volume="${3:-}"
-            installer "$app" || refuse "installateur $app"
-            [[ "$volume" == /Volumes/* ]] && external "$volume" || refuse "volume $volume"
-            exec "$app/Contents/Resources/createinstallmedia" --volume "$volume" --nointeraction ;;
-        rename)
-            part="${2:-}"
-            [[ "$part" =~ ^disk[0-9]+s[0-9]+$ ]] && external "$part" || refuse "partition $part"
-            exec diskutil rename "$part" "${3:-}" ;;
-        move)
-            src="${2:-}"; dst="${3:-}"
-            [[ "$(basename "$src")" == Install\ macOS*.app && "$(basename "$dst")" == Install\ macOS*.app ]] || refuse "déplacement"
-            [[ "$src" == /Applications/* || "$src" == /Users/* ]] && [[ "$dst" == /Users/* ]] || refuse "déplacement"
-            mkdir -p "$(dirname "$dst")"
-            exec mv -n "$src" "$dst" ;;
-        *)
-            refuse "commande ${1:-}" ;;
-    esac
-    """#
+    /// Version de l'assistant livrée avec cette app (ligne HELPER_VERSION=… du script).
+    nonisolated static var version: String {
+        script.firstMatch(of: #/HELPER_VERSION=(\d+)/#).map { String($0.1) } ?? "0"
+    }
+
 }

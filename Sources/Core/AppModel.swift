@@ -40,6 +40,7 @@ final class AppModel {
         notifier = Notifier(settings: settings)
         downloads = DownloadManager(settings: settings, library: library, notifier: notifier)
         downloads.catalog = catalog
+        updater.helper = helper
         disks = DiskStore(settings: settings, catalog: catalog, library: library)
         preparer = Preparer(settings: settings, catalog: catalog, library: library, downloads: downloads,
                             disks: disks, history: history, log: log, notifier: notifier)
@@ -48,7 +49,9 @@ final class AppModel {
     }
 
     func start() async {
-        // L'app doit toujours être à jour : au lancement rien n'est en cours, on installe tout de suite.
+        // L'app doit toujours être à jour : au lancement rien n'est en cours, on installe tout de suite
+        // (en échec, une fenêtre bloque l'app tant que la mise à jour n'est pas faite).
+        await helper.check()
         await updater.check(silently: true)
         if updater.state == .available { await updater.install() }
         await helper.check()
@@ -176,6 +179,25 @@ final class AppModel {
 
     // MARK: Réglages Système à faire (bandeau rouge en haut de l'app)
 
+    /// Espace libre sur le disque du dossier prepare_disk (relu toutes les 15 secondes).
+    var freeSpace: Int64 = 0
+
+    func refreshFreeSpace() {
+        let values = try? URL(fileURLWithPath: settings.dataFolder).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        freeSpace = values?.volumeAvailableCapacityForImportantUsage ?? 0
+    }
+
+    /// Espace nécessaire pour télécharger ce qui manque (un macOS demande le double de sa taille le temps
+    /// de l'assembler : le paquet d'Apple, puis l'installateur extrait).
+    var spaceNeeded: Int64 {
+        validatedChecklist().compactMap(\.download).reduce(0) { total, kind in
+            switch kind {
+            case let .macOS(installer): return total + installer.sizeBytes * 21 / 10
+            case let .ipsw(firmware, _): return total + firmware.filesize
+            }
+        }
+    }
+
     /// État de l'agent (icône de la barre des menus, téléchargements app fermée).
     var agentStatus: SMAppService.Status = .notRegistered
     var notificationsDenied = false
@@ -201,6 +223,7 @@ final class AppModel {
 
     /// Revérifie tout ce que l'utilisateur doit autoriser ; le bandeau disparaît dès que c'est fait.
     func refreshSetup() async {
+        refreshFreeSpace()
         hasFullDiskAccess = Self.checkFullDiskAccess()
         agentStatus = SMAppService.agent(plistName: Agent.plist).status
         notificationsDenied = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
@@ -361,11 +384,14 @@ final class AppModel {
             while let self {
                 try? await Task.sleep(for: .seconds(15))
                 guard !self.preparer.isRunning else { continue }
-                // Mise à jour de l'app : toutes les heures, installée dès que rien n'est en cours.
-                if Date().timeIntervalSince(lastAppUpdate) > 3600 {
+                // Mise à jour de l'app : cherchée toutes les heures. Une fois trouvée, installée dès que rien n'est
+                // en cours (téléchargement ou préparation de disque : on attend la fin, vérifié toutes les 15 s).
+                if self.updater.state != .available && Date().timeIntervalSince(lastAppUpdate) > 3600 {
                     lastAppUpdate = Date()
                     await self.updater.check(silently: true)
-                    if self.updater.state == .available && self.downloads.active.isEmpty { await self.updater.install() }
+                }
+                if self.updater.state == .available && self.downloads.active.isEmpty && !self.preparer.isRunning {
+                    await self.updater.install()
                 }
                 if Date().timeIntervalSince(lastValidated) > 5 * 60 {
                     lastValidated = Date()

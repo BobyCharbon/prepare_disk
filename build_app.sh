@@ -11,6 +11,7 @@ cp .build/release/PrepareDisk "$APP/Contents/MacOS/PrepareDisk"
 mkdir -p "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
 cp LaunchAgents/*.plist "$APP/Contents/Library/LaunchAgents/"   # agent d'arrière-plan (téléchargement automatique)
 cp CHANGELOG.md "$APP/Contents/Resources/CHANGELOG.md"
+cp Helper/helper.sh "$APP/Contents/Resources/helper.sh"   # assistant système (se met à jour tout seul)
 cp Icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"   # régénérer : swift Icon/make_icon.swift Icon/AppIcon.png
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

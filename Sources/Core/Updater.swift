@@ -23,6 +23,8 @@ final class Updater {
 
     var state: State = .idle
     var release: Release?
+    /// Pour remplacer l'app quand on n'a pas le droit de le faire soi-même (compte standard, /Applications).
+    var helper: Helper?
 
     var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
 
@@ -95,12 +97,13 @@ final class Updater {
         }
 
         let current = Bundle.main.bundlePath
-        do {
-            _ = try await NSWorkspace.shared.recycle([URL(fileURLWithPath: current)])
-            try FileManager.default.moveItem(atPath: newApp, toPath: current)
-        } catch {
-            return fail("impossible de remplacer l'app (\(error.localizedDescription)).")
+        if !Self.replace(current, with: newApp) {
+            // Pas le droit d'écrire ici : l'assistant système (sans mot de passe) s'en charge.
+            guard let helper, helper.isReady, await helper.run(["update", newApp, current]).status == 0 else {
+                return fail("impossible de remplacer l'app (droits insuffisants). Faites la « Configuration unique », ou installez la nouvelle version à la main.")
+            }
         }
+        try? FileManager.default.removeItem(atPath: folder)
         guard relaunch else { return }   // agent : la nouvelle version servira au prochain lancement
         // Relance une fois cette instance fermée.
         let process = Process()
@@ -108,6 +111,26 @@ final class Updater {
         process.arguments = ["-c", "sleep 1; /usr/bin/open \(Shell.quote(current))"]
         try? process.run()
         NSApp.terminate(nil)
+    }
+
+    /// Remplace l'app sur place ; l'ancienne version est supprimée (pas mise à la corbeille). Remise en place si échec.
+    private static func replace(_ current: String, with newApp: String) -> Bool {
+        let fm = FileManager.default
+        let old = (current as NSString).deletingLastPathComponent + "/.Prepare Disk.old.app"
+        try? fm.removeItem(atPath: old)
+        do {
+            try fm.moveItem(atPath: current, toPath: old)
+        } catch {
+            return false
+        }
+        do {
+            try fm.moveItem(atPath: newApp, toPath: current)
+            try? fm.removeItem(atPath: old)
+            return true
+        } catch {
+            try? fm.moveItem(atPath: old, toPath: current)
+            return false
+        }
     }
 
     private func fail(_ reason: String) {

@@ -26,6 +26,7 @@ struct VersionsView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(toDownload.isEmpty)
                     .help("Télécharge tout ce qui manque et le range dans ~/prepare_disk. Un téléchargement raté recommence tout seul.")
+                    DiskSpaceLabel(model: model)
                     }
                 }
                 ValidatedBanner(model: model)

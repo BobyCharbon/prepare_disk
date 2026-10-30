@@ -143,6 +143,7 @@ final class AgentModel {
 
     /// Relit les fichiers et, si permis, lance les téléchargements manquants.
     func check(download: Bool) async {
+        model.refreshFreeSpace()
         await model.library.scan()
         items = model.validatedChecklist()
         lastCheck = Date()
@@ -197,6 +198,7 @@ struct AgentPanel: View {
                 .font(.callout)
             }
             Divider()
+            DiskSpaceLabel(model: model)
             Label(model.settings.autoDownload ? "Téléchargement automatique activé" : "Téléchargement automatique désactivé",
                   systemImage: model.settings.autoDownload ? "arrow.triangle.2.circlepath" : "pause.circle")
                 .font(.caption).foregroundStyle(.secondary)
