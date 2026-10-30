@@ -22,6 +22,7 @@ struct VersionsView: View {
                     .disabled(toDownload.isEmpty)
                     .help("Télécharge tout ce qui manque et le range dans ~/prepare_disk. Un téléchargement raté recommence tout seul.")
                 }
+                ValidatedBanner(model: model)
                 ForEach(model.updateNotices, id: \.self) { Banner(text: $0, color: .blue, icon: "sparkles") }
                 ForEach(model.preparer.plan().blocked, id: \.self) { Banner(text: $0, color: .red, icon: "nosign") }
 
@@ -30,11 +31,15 @@ struct VersionsView: View {
                 } content: {
                     ForEach(0..<3, id: \.self) { slot in macOSRow(slot) }
                     HStack {
-                        Button("Les 3 derniers macOS") {
-                            model.settings.selected = Array((model.catalog.latestMajors(3).map(\.version) + ["", "", ""]).prefix(3))
-                            model.checkForUpdates(notify: false)
+                        // Raccourcis réservés à l'administrateur.
+                        Group {
+                            Button("Les 3 derniers macOS") {
+                                model.settings.selected = Array((model.catalog.latestMajors(3).map(\.version) + ["", "", ""]).prefix(3))
+                                model.checkForUpdates(notify: false)
+                            }
+                            Button("Dernière version de chacun") { model.useLatestVersions() }
                         }
-                        Button("Dernière version de chacun") { model.useLatestVersions() }
+                        .disabled(!model.canEditVersions)
                         Spacer()
                         Button("Vérifier chez Apple") { Task { await model.refreshAll() } }
                     }
@@ -186,5 +191,38 @@ struct VersionsView: View {
                 }
             }
         }
+    }
+}
+
+/// D'où viennent les versions : liste publiée par l'administrateur (verrouillée), ou mode administrateur.
+private struct ValidatedBanner: View {
+    @Bindable var model: AppModel
+    @State private var message: String?
+
+    var body: some View {
+        let store = model.validated
+        if store.isAdmin {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Banner(text: model.hasUnpublishedVersions
+                           ? "Mode administrateur : ces versions ne sont pas encore publiées. Les autres Mac gardent la liste du \(store.published?.updated ?? "—")."
+                           : "Mode administrateur : ces versions sont publiées (liste du \(store.published?.updated ?? "—")), tous les Mac les suivent.",
+                           color: model.hasUnpublishedVersions ? .orange : .green, icon: "person.badge.key.fill")
+                    if store.isPublishing {
+                        ProgressView().controlSize(.small)
+                    } else if model.hasUnpublishedVersions {
+                        Button("Publier pour tout le monde") {
+                            Task { message = await model.publishValidated() ?? "Publié : tous les Mac recevront ces versions au prochain démarrage ou dans les 30 minutes." }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+            }
+        } else if let published = store.published {
+            Banner(text: "Versions validées par l'administrateur (liste du \(published.updated)). Elles se mettent à jour toutes seules ; téléchargez ce qui manque avec « Tout télécharger ».",
+                   color: .blue, icon: "lock.fill")
+        }
+        if let error = store.error { Banner(text: error) }
     }
 }

@@ -55,8 +55,6 @@ final class AppSettings {
     var notificationsEnabled: Bool { didSet { defaults.set(notificationsEnabled, forKey: "notificationsEnabled") } }
     var verifyChecksums: Bool { didSet { defaults.set(verifyChecksums, forKey: "verifyChecksums") } }
     var removeOldOnUpdate: Bool { didSet { defaults.set(removeOldOnUpdate, forKey: "removeOldOnUpdate") } }
-    /// Installe les nouvelles versions de l'app publiées sur GitHub, au lancement.
-    var autoUpdate: Bool { didSet { defaults.set(autoUpdate, forKey: "autoUpdate") } }
     /// Après un téléchargement, met à la corbeille les anciennes versions remplacées dans ~/prepare_disk.
     var removeOldVersions: Bool { didSet { defaults.set(removeOldVersions, forKey: "removeOldVersions") } }
 
@@ -78,7 +76,6 @@ final class AppSettings {
         notificationsEnabled = bool("notificationsEnabled", true)
         verifyChecksums = bool("verifyChecksums", true)
         removeOldOnUpdate = bool("removeOldOnUpdate", true)
-        autoUpdate = bool("autoUpdate", true)
         removeOldVersions = bool("removeOldVersions", true)
         clearStalePins()
     }

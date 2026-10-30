@@ -10,6 +10,7 @@ struct SettingsView: View {
             MacOSSettings(model: model).tabItem { Label("macOS", systemImage: "apple.logo") }
             IPSWSettings(model: model).tabItem { Label("IPSW", systemImage: "ipad") }
             UpdateSettings(model: model).tabItem { Label("Mise à jour", systemImage: "arrow.down.app") }
+            AdminSettings(model: model).tabItem { Label("Administration", systemImage: "person.badge.key") }
         }
         .frame(width: 620, height: 470)
         .disabled(model.preparer.isRunning)
@@ -172,7 +173,8 @@ private struct UpdateSettings: View {
                 if case let .downloading(progress) = updater.state { ProgressView(value: progress) }
             }
             Section {
-                Toggle("Mettre à jour automatiquement au lancement", isOn: $model.settings.autoUpdate)
+                Text("Prepare Disk se met à jour tout seul : au démarrage, puis toutes les heures dès que rien n'est en cours.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Link("Toutes les versions sur GitHub", destination: URL(string: "https://github.com/\(Updater.repository)/releases")!)
             }
         }
@@ -199,5 +201,53 @@ private struct UpdateSettings: View {
 
     private func isBusy(_ state: Updater.State) -> Bool {
         switch state { case .checking, .downloading, .installing: return true; default: return false }
+    }
+}
+
+/// Mode administrateur : choisir les versions validées et les publier pour tous les Mac.
+private struct AdminSettings: View {
+    @Bindable var model: AppModel
+    @State private var token = ""
+    @State private var message: String?
+    @State private var checking = false
+
+    var body: some View {
+        Form {
+            if model.validated.isAdmin {
+                Section("Mode administrateur activé") {
+                    Text("Changez les versions dans « Versions validées », puis cliquez sur « Publier pour tout le monde ». Les autres Mac les reçoivent au démarrage ou dans les 30 minutes.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Quitter le mode administrateur", role: .destructive) {
+                        model.validated.disableAdmin()
+                        Task { await model.syncValidated(notify: false) }
+                    }
+                }
+            } else {
+                Section("Devenir administrateur") {
+                    Text("Seul l'administrateur choisit les versions validées. Il lui faut un jeton GitHub avec le droit de modifier le dépôt : github.com › Settings › Developer settings › Fine-grained tokens › Generate, dépôt « \(Updater.repository) », permission Contents : Read and write.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    SecureField("Jeton GitHub", text: $token)
+                    HStack {
+                        Button("Activer") {
+                            checking = true
+                            Task {
+                                message = await model.validated.enableAdmin(token: token.trimmingCharacters(in: .whitespacesAndNewlines))
+                                if message == nil { token = "" }
+                                checking = false
+                            }
+                        }
+                        .disabled(token.isEmpty || checking)
+                        if checking { ProgressView().controlSize(.small) }
+                    }
+                    if let message { Text(message).foregroundStyle(.red) }
+                }
+            }
+            Section("Liste publiée") {
+                LabeledContent("Mise à jour le", value: model.validated.published?.updated ?? "aucune")
+                LabeledContent("macOS", value: model.validated.published?.macOS.filter { !$0.isEmpty }.joined(separator: ", ") ?? "—")
+                Button("Relire maintenant") { Task { await model.syncValidated(notify: false) } }
+            }
+        }
+        .formStyle(.grouped)
     }
 }

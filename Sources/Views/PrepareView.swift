@@ -217,6 +217,7 @@ struct VersionPicker: View {
             }
         }
         .labelsHidden()
+        .disabled(!model.canEditVersions)
     }
 }
 
@@ -313,6 +314,7 @@ struct MacIPSWRow: View {
                               automatic: auto.map { "Automatique (\($0.version))" } ?? "Automatique",
                               automaticVersion: auto?.version,
                               downloaded: Set(model.library.macIPSWs.compactMap(\.version)))
+                .disabled(!model.canEditVersions)
             if let fw { signedPill(fw.signed) }
             Spacer()
             let included = settings.includeMacIPSW && settings.macIPSWSlots[slot]
@@ -350,6 +352,7 @@ struct IPadRow: View {
                               automatic: latest.map { "Dernière signée (\($0.version))" } ?? "Dernière signée",
                               automaticVersion: latest?.version,
                               downloaded: Set(local.compactMap(\.version)))
+                .disabled(!model.canEditVersions)
             if let fw { signedPill(fw.signed) }
             Spacer()
             if !device.enabled || !model.settings.includeIPadIPSW {

@@ -16,6 +16,7 @@ final class AppModel {
     let disks: DiskStore
     let preparer: Preparer
     let updater = Updater()
+    let validated = ValidatedStore()
 
     /// Disques cochés dans l'assistant.
     var selectedDisks: Set<String> = []
@@ -41,18 +42,18 @@ final class AppModel {
     }
 
     func start() async {
-        // Au lancement rien n'est en cours : on peut installer une mise à jour tout de suite.
-        if settings.autoUpdate {
-            await updater.check(silently: true)
-            if updater.state == .available { await updater.install() }
-        }
+        // L'app doit toujours être à jour : au lancement rien n'est en cours, on installe tout de suite.
+        await updater.check(silently: true)
+        if updater.state == .available { await updater.install() }
+        // Puis les versions validées publiées par l'administrateur.
+        await syncValidated(notify: false)
         notifier.requestAuthorization()
         watchDisks()
         async let scan: Void = library.scan()
         async let list: Void = disks.load()
         async let firmwares: Void = refreshFirmwares()
         await catalog.loadInstallers()
-        if settings.selected.allSatisfy(\.isEmpty) {
+        if settings.selected.allSatisfy(\.isEmpty) && validated.published == nil {
             let picks = catalog.latestMajors(3).map(\.version)
             settings.selected = Array((picks + ["", "", ""]).prefix(3))
         }
@@ -165,16 +166,57 @@ final class AppModel {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
     }
 
+    // MARK: Versions validées
+
+    /// Les versions ne se changent que si on est administrateur (ou si aucune liste n'est encore publiée).
+    var canEditVersions: Bool { validated.isAdmin || validated.published == nil }
+
+    /// Les versions réglées ici diffèrent de celles publiées (l'administrateur a des changements à publier).
+    var hasUnpublishedVersions: Bool {
+        guard let published = validated.published else { return true }
+        return !ValidatedVersions(from: settings).sameVersions(as: published)
+    }
+
+    /// Relit la liste publiée et l'applique (sauf chez l'administrateur, qui prépare la suivante).
+    func syncValidated(notify: Bool) async {
+        let changed = await validated.fetch()
+        guard !validated.isAdmin, let list = validated.published else { return }
+        let before = ValidatedVersions(from: settings)
+        validated.apply(to: settings)
+        if !before.sameVersions(as: ValidatedVersions(from: settings)) {
+            log.add("Nouvelles versions validées appliquées (liste du \(list.updated)).")
+            if notify || changed {
+                notifier.notify("Nouvelles versions validées",
+                                "macOS " + list.macOS.filter { !$0.isEmpty }.joined(separator: ", ") + ". Ouvrez Versions validées pour les télécharger.")
+            }
+            checkForUpdates(notify: false)
+        }
+    }
+
+    func publishValidated() async -> String? {
+        await validated.publish(ValidatedVersions(from: settings))
+    }
+
     // MARK: Actualisation automatique
 
     /// Personne n'appuie sur « Actualiser » : les fichiers sont relus toutes les 15 s quand l'app est au premier plan
     /// (et à chaque retour dans l'app), les versions d'Apple toutes les 3 heures.
     private func autoRefresh() {
         Task { @MainActor [weak self] in
-            var lastApple = Date()
+            var lastApple = Date(), lastValidated = Date(), lastAppUpdate = Date()
             while let self {
                 try? await Task.sleep(for: .seconds(15))
                 guard !self.preparer.isRunning else { continue }
+                // Mise à jour de l'app : toutes les heures, installée dès que rien n'est en cours.
+                if Date().timeIntervalSince(lastAppUpdate) > 3600 {
+                    lastAppUpdate = Date()
+                    await self.updater.check(silently: true)
+                    if self.updater.state == .available && self.downloads.active.isEmpty { await self.updater.install() }
+                }
+                if Date().timeIntervalSince(lastValidated) > 30 * 60 {
+                    lastValidated = Date()
+                    await self.syncValidated(notify: true)
+                }
                 if Date().timeIntervalSince(lastApple) > 3 * 3600 {
                     lastApple = Date()
                     await self.catalog.loadInstallers()

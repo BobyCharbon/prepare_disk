@@ -3,6 +3,13 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.2.0 — 30 octobre 2026
+
+- Versions validées centralisées : l'administrateur choisit les versions et les publie, tous les Mac les reçoivent automatiquement (au démarrage et toutes les 30 minutes).
+- Sur les Mac des utilisateurs, ces versions sont verrouillées ; une notification invite à télécharger les nouvelles.
+- Nouvel onglet Réglages › Administration pour activer le mode administrateur.
+- L'app se met à jour toute seule, sans réglage : au démarrage, puis toutes les heures dès que rien n'est en cours.
+
 ## 1.1.0 — 30 octobre 2026
 
 - Chaque IPSW est reconnu par son contenu (modèles d'iPad et numéro de build), plus seulement par son nom : un fichier renommé ou posé dans le mauvais dossier est repéré et proposé au rangement.
