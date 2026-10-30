@@ -3,6 +3,16 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.4.0 — 30 octobre 2026
+
+- App signée par un développeur Apple et notarisée : elle s'ouvre directement, sans avertissement ni passage par les Réglages.
+- Icône dans la barre des menus : elle montre si toutes les versions validées sont sur le Mac, même quand l'app est fermée.
+- Téléchargement automatique (interrupteur dans Versions validées) : télécharge seul les versions validées, garde le Mac éveillé, recommence en cas d'échec sans inonder le réseau.
+- Les macOS sont téléchargés depuis le paquet officiel d'Apple : plus rapide, plus de blocage sur les anciennes versions, ni passage par Applications.
+- Configuration unique : le mot de passe administrateur n'est demandé qu'une seule fois.
+- Plus de demande du trousseau au démarrage ni en changeant de version.
+- Dernières versions d'Apple en rose, versions validées aux couleurs de l'entreprise ; menu réorganisé.
+
 ## 1.3.0 — 30 octobre 2026
 
 - Mode administrateur activable d'un clic, en haut de Versions validées : on peut changer et télécharger d'autres versions sans rien publier, et publier seulement si on le veut.
