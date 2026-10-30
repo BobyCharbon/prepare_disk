@@ -59,7 +59,8 @@ if [ "${NOTARIZE:-0}" = 1 ] && [ -n "$DEVELOPER_ID" ]; then
     rm -f notarize.zip
     grep -q "status: Accepted" notarize.log || { echo "ERREUR : notarisation refusée par Apple"; rm -f notarize.log; exit 1; }
     rm -f notarize.log
-    xcrun stapler staple "$APP"
+    # Le ticket met parfois quelques secondes à être disponible chez Apple : plusieurs essais.
+    for i in 1 2 3 4 5; do xcrun stapler staple "$APP" && break; [ $i = 5 ] && exit 1; sleep 20; done
 fi
 
 # Toujours une copie zippée, prête à distribuer (c'est elle que publie GitHub).
