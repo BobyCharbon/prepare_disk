@@ -257,7 +257,7 @@ final class AppModel {
 
     /// Un élément validé et coché : sur ce Mac au bon endroit, sur ce Mac ailleurs, ou à télécharger.
     struct Needed: Identifiable {
-        enum State { case ok, misplaced, missing }
+        enum State { case ok, misplaced, missing, verifying, corrupted }
         let label: String
         let state: State
         var download: DownloadJob.Kind?
@@ -265,15 +265,20 @@ final class AppModel {
     }
 
     func validatedChecklist() -> [Needed] {
+        // « ok » seulement si le fichier est certifié intact (et bien rangé).
         func inFolder(_ path: String?, _ folder: String) -> Needed.State {
             guard let path else { return .missing }
-            return path.hasPrefix(folder + "/") ? .ok : .misplaced
+            switch library.certification(path) {
+            case .corrupted: return .corrupted
+            case .checking, .unknown: return .verifying
+            case .certified: return path.hasPrefix(folder + "/") ? .ok : .misplaced
+            }
         }
         var items: [Needed] = []
         for version in settings.selected where !version.isEmpty {
             let state = inFolder(library.installer(for: version, build: catalog.installer(version: version)?.build)?.path, settings.intelFolder)
             items.append(Needed(label: "macOS \(version)", state: state,
-                                download: state == .missing ? catalog.installer(version: version).map { .macOS($0) } : nil))
+                                download: state == .missing || state == .corrupted ? catalog.installer(version: version).map { .macOS($0) } : nil))
         }
         if settings.includeMacIPSW {
             for (slot, version) in settings.selected.enumerated() where !version.isEmpty && settings.macIPSWSlots[slot] {
@@ -281,7 +286,7 @@ final class AppModel {
                                                    pinned: settings.macIPSWVersions[slot]), fw.signed else { continue }
                 let state = inFolder(library.ipsw(fw, device: nil)?.path, settings.siliconFolder)
                 items.append(Needed(label: "IPSW Mac \(fw.version)", state: state,
-                                    download: state == .missing ? .ipsw(fw, destination: settings.macIPSWPath(fw.version)) : nil))
+                                    download: state == .missing || state == .corrupted ? .ipsw(fw, destination: settings.macIPSWPath(fw.version)) : nil))
             }
         }
         if settings.includeIPadIPSW {
@@ -290,7 +295,7 @@ final class AppModel {
                 let local = library.ipsw(fw, device: device)
                 let state = inFolder(local?.path, settings.folder(for: device))
                 items.append(Needed(label: "\(device.name) \(fw.version)", state: state,
-                                    download: state == .missing ? .ipsw(fw, destination: settings.ipswPath(device, fw.version)) : nil))
+                                    download: state == .missing || state == .corrupted ? .ipsw(fw, destination: settings.ipswPath(device, fw.version)) : nil))
             }
         }
         if settings.includeLoops {

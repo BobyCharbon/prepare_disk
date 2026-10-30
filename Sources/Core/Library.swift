@@ -183,6 +183,7 @@ final class Library {
         loops = files(in: settings.othersFolder, extensions: ["zip", "dmg", "pkg"])
             .filter { $0.name.localizedCaseInsensitiveContains("loop") }
         suggestions = proposals
+        Task { await certifyPending() }
     }
 
     private enum Owner { case mac, device(Device) }
@@ -234,11 +235,11 @@ final class Library {
         for folder in folders where !fm.fileExists(atPath: folder) {
             try? fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
         }
-        // Restes d'un téléchargement interrompu (app quittée, plantage) : plus vieux de 12 h, on les supprime.
+        // Restes d'un téléchargement interrompu jamais repris : plus vieux de 3 jours, on les supprime.
         for folder in folders {
-            for name in (try? fm.contentsOfDirectory(atPath: folder)) ?? [] where name.hasPrefix(".") && (name.hasSuffix(".work") || name.hasSuffix(".part")) {
+            for name in (try? fm.contentsOfDirectory(atPath: folder)) ?? [] where name.hasPrefix(".") && (name.hasSuffix(".work") || name.hasSuffix(".part") || name.hasSuffix(".state")) {
                 let path = folder + "/" + name
-                if Date().timeIntervalSince(modificationDate(path)) > 12 * 3600 { try? fm.removeItem(atPath: path) }
+                if Date().timeIntervalSince(modificationDate(path)) > 72 * 3600 { try? fm.removeItem(atPath: path) }
             }
         }
     }
@@ -394,6 +395,80 @@ final class Library {
         }
         if !errors.isEmpty { moveError = errors.joined(separator: " · ") }
         return errors.isEmpty
+    }
+
+    // MARK: Certification (« Sur ce Mac » seulement pour un fichier prouvé intact)
+
+    enum Certification { case certified, checking, corrupted, unknown }
+
+    /// Fichiers certifiés, retenus par « chemin|taille|date » : un fichier modifié est revérifié.
+    private var certified: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "certifiedFiles") ?? []) {
+        didSet { defaults.set(Array(certified), forKey: "certifiedFiles") }
+    }
+    var checking: Set<String> = []
+    var corrupted: Set<String> = []
+    private var isCertifying = false
+
+    /// Empreinte d'un fichier (ou, pour un installateur, de son image système) : taille et date.
+    private func fingerprint(_ path: String) -> String {
+        let target = path.hasSuffix(".app") ? path + "/Contents/SharedSupport/SharedSupport.dmg" : path
+        let attributes = try? FileManager.default.attributesOfItem(atPath: target)
+        return "\(path)|\((attributes?[.size] as? Int64) ?? -1)|\(modificationDate(target).timeIntervalSince1970)"
+    }
+
+    func certification(_ path: String) -> Certification {
+        if corrupted.contains(path) { return .corrupted }
+        if checking.contains(path) { return .checking }
+        return certified.contains(fingerprint(path)) ? .certified : .unknown
+    }
+
+    func markCertified(_ path: String) {
+        corrupted.remove(path)
+        certified.insert(fingerprint(path))
+    }
+
+    /// Installateur certifié : version et build lus dans son image système (donc lisible), image présente,
+    /// createinstallmedia signé par Apple.
+    func certifyInstaller(_ item: LocalInstaller) async -> Bool {
+        let shared = item.path + "/Contents/SharedSupport/SharedSupport.dmg"
+        guard item.build != nil, FileManager.default.fileExists(atPath: shared) else { return false }
+        let signed = await Shell.run("/usr/bin/codesign", ["--verify", "-R=anchor apple", item.createInstallMedia]).status == 0
+        if signed { markCertified(item.path) }
+        return signed
+    }
+
+    /// IPSW certifié : empreinte SHA-1 identique à celle publiée pour ce firmware, et BuildManifest lisible.
+    private func certifyIPSW(_ file: LocalFile, _ firmware: Firmware?) async -> Bool {
+        guard file.build != nil else { return false }          // archive illisible : incomplète ou abîmée
+        guard let expected = firmware?.sha1sum else { return firmware != nil }
+        let url = URL(fileURLWithPath: file.path)
+        return await Task.detached { sha1(of: url) }.value == expected.lowercased()
+    }
+
+    /// Vérifie, un par un et en arrière-plan, les fichiers pas encore certifiés.
+    func certifyPending() async {
+        guard !isCertifying else { return }
+        isCertifying = true
+        defer { isCertifying = false }
+        for item in installers where certification(item.path) == .unknown {
+            checking.insert(item.path)
+            let ok = await certifyInstaller(item)
+            checking.remove(item.path)
+            if !ok { corrupted.insert(item.path) }
+        }
+        guard let catalog else { return }
+        var ipsws = macIPSWs.map { ($0, catalog.firmwares[settings.macIdentifier]?.first(where: $0.matches)) }
+        for device in settings.devices {
+            ipsws += (iPadIPSWs[device.name] ?? []).map { ($0, catalog.firmwares[device.identifier]?.first(where: $0.matches)) }
+        }
+        for (file, firmware) in ipsws where file.path.hasSuffix(".ipsw") && certification(file.path) == .unknown {
+            // Firmware pas encore connu (catalogue d'Apple pas chargé) : on attend, sauf archive illisible.
+            if firmware == nil && file.build != nil { continue }
+            checking.insert(file.path)
+            let ok = await certifyIPSW(file, firmware)
+            checking.remove(file.path)
+            if ok { markCertified(file.path) } else { corrupted.insert(file.path) }
+        }
     }
 
     /// Copie un fichier de loops choisi dans le dossier Others.

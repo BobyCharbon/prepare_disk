@@ -58,6 +58,43 @@ final class DownloadJob: Identifiable {
     }
 }
 
+/// Un téléchargement vu par un autre processus (l'icône de la barre des menus voit ceux de l'app, et inversement).
+struct SharedDownload: Codable, Identifiable {
+    let key: String
+    let title: String
+    let progress: Double
+    let verifying: Bool
+    var id: String { key }
+}
+
+/// État des téléchargements de chaque processus, dans un petit fichier par processus, réécrit chaque seconde.
+enum SharedDownloads {
+    private static let folder = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/PrepareDisk/downloads")
+
+    @MainActor
+    static func publish(_ jobs: [DownloadJob]) {
+        let file = folder.appendingPathComponent("\(getpid()).json")
+        let active = jobs.filter { !$0.isFinished }
+        if active.isEmpty { try? FileManager.default.removeItem(at: file); return }
+        let shared = active.map { SharedDownload(key: $0.key, title: $0.title, progress: $0.progress, verifying: $0.state == .verifying) }
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? JSONEncoder().encode(shared).write(to: file, options: .atomic)
+    }
+
+    /// Les téléchargements des autres processus encore en vie (fichier récent).
+    static func others() -> [SharedDownload] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return names.flatMap { name -> [SharedDownload] in
+            let url = folder.appendingPathComponent(name)
+            guard let pid = Int32((name as NSString).deletingPathExtension), pid != getpid() else { return [] }
+            let fresh = ((try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate)
+                .map { Date().timeIntervalSince($0) < 10 } ?? false
+            guard kill(pid, 0) == 0, fresh else { try? FileManager.default.removeItem(at: url); return [] }
+            return (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([SharedDownload].self, from: $0) } ?? []
+        }
+    }
+}
+
 /// File d'attente des téléchargements, un à la fois.
 @MainActor
 @Observable
@@ -114,6 +151,14 @@ final class DownloadManager {
             if awake == nil {
                 awake = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .userInitiated],
                                                               reason: "Téléchargement des versions validées")
+                // Partage l'avancement chaque seconde (l'icône de la barre des menus l'affiche en direct).
+                Task {
+                    while awake != nil {
+                        SharedDownloads.publish(jobs)
+                        try? await Task.sleep(for: .seconds(1))
+                    }
+                    SharedDownloads.publish([])
+                }
             }
             runningCount += 1
             job.state = .running
@@ -219,12 +264,15 @@ final class DownloadManager {
     /// « Install macOS ….app » directement dans OS/MacOS/Intel : ni /Applications, ni mot de passe.
     private func runPackage(_ job: DownloadJob, _ installer: Installer, _ package: InstallerPackage) async {
         let fm = FileManager.default
-        let work = URL(fileURLWithPath: settings.intelFolder).appendingPathComponent(".\(UUID().uuidString).work")
-        defer { try? fm.removeItem(at: work) }
+        // Dossier de travail au nom du build : un téléchargement interrompu y reprend.
+        let work = URL(fileURLWithPath: settings.intelFolder).appendingPathComponent(".\(package.build).work")
         try? fm.createDirectory(at: work, withIntermediateDirectories: true)
+        var keepForResume = true
+        defer { if !keepForResume { try? fm.removeItem(at: work) } }
         // Le paquet, puis son contenu extrait : il faut environ deux fois sa taille.
         let free = (try? work.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage ?? .max
-        guard free > package.size * 21 / 10 else {
+        let already = (try? fm.attributesOfItem(atPath: work.appendingPathComponent("InstallAssistant.pkg").path)[.size] as? Int64) ?? 0
+        guard free + already > package.size * 21 / 10 else {
             job.state = .failed("espace disque insuffisant (\((package.size * 21 / 10).fileSize) nécessaires)")
             return
         }
@@ -238,16 +286,20 @@ final class DownloadManager {
         job.cancel = nil
         if job.state == .cancelled { return }
         if case let .failure(error) = result { job.state = .failed(error.localizedDescription); return }
+        keepForResume = false   // téléchargé : quoi qu'il arrive ensuite, on ne réutilisera pas ce dossier
 
+        // Certification : paquet signé par Apple (sa table des matières, signée, contient l'empreinte de chaque
+        // fichier, que l'extraction vérifie), puis image système lisible avec la bonne version et le bon build.
         job.state = .verifying
         let signature = await Shell.run("/usr/sbin/pkgutil", ["--check-signature", pkg.path])
         guard signature.status == 0, signature.output.contains("signed Apple Software") else {
-            job.state = .failed("paquet non signé par Apple")
+            job.state = .failed("paquet non signé par Apple, il sera retéléchargé")
             return
         }
         let out = work.appendingPathComponent("out")
+        try? fm.removeItem(at: out)
         guard await Shell.run("/usr/sbin/pkgutil", ["--expand-full", pkg.path, out.path]).status == 0 else {
-            job.state = .failed("paquet illisible")
+            job.state = .failed("paquet abîmé, il sera retéléchargé")
             return
         }
         try? fm.removeItem(at: pkg)
@@ -269,11 +321,12 @@ final class DownloadManager {
             return
         }
         await library.scan()
-        if library.installer(matching: installer) != nil {
+        if let local = library.installer(matching: installer), await library.certifyInstaller(local) {
             job.progress = 1
             job.state = .done
         } else {
-            job.state = .failed("installateur assemblé mais version différente")
+            try? fm.removeItem(at: destination)
+            job.state = .failed("installateur assemblé mais invalide (version, build ou signature)")
         }
     }
 
@@ -292,7 +345,8 @@ final class DownloadManager {
             // En plusieurs morceaux en parallèle, écrits directement dans le dossier de destination.
             let folder = (destination as NSString).deletingLastPathComponent
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-            let part = URL(fileURLWithPath: folder).appendingPathComponent(".\(UUID().uuidString).part")
+            // Nom fixe : un téléchargement interrompu reprend sur ce même fichier partiel.
+            let part = URL(fileURLWithPath: folder).appendingPathComponent("." + (destination as NSString).lastPathComponent + ".part")
             let downloader = SegmentedDownloader()
             job.cancel = { downloader.cancel() }
             result = await downloader.download(url, size: size, to: part, onProgress: progress)
@@ -307,20 +361,30 @@ final class DownloadManager {
         case let .failure(error):
             job.state = .failed(error.localizedDescription)
         case let .success(temp):
-            if settings.verifyChecksums, let expected = firmware.sha1sum {
-                job.state = .verifying
+            // Certification obligatoire : l'empreinte SHA-1 doit être celle publiée pour ce firmware.
+            job.state = .verifying
+            if let expected = firmware.sha1sum {
                 let actual = await Task.detached { sha1(of: temp) }.value
                 guard actual == expected.lowercased() else {
                     try? FileManager.default.removeItem(at: temp)
-                    job.state = .failed("fichier corrompu (SHA-1 différent)")
+                    try? FileManager.default.removeItem(at: SegmentedDownloader.stateURL(for: temp))
+                    job.state = .failed("fichier corrompu (SHA-1 différent), il sera retéléchargé")
                     return
                 }
+            }
+            // Et le contenu : bons modèles, bon build.
+            let check = LocalFile(path: temp.path, size: itemSize(temp.path), date: Date())
+            guard check.matches(firmware) else {
+                try? FileManager.default.removeItem(at: temp)
+                job.state = .failed("ce n'est pas le bon firmware (modèle ou build différent)")
+                return
             }
             do {
                 let dest = URL(fileURLWithPath: destination)
                 try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
                 try FileManager.default.moveItem(at: temp, to: dest)
+                library.markCertified(dest.path)
                 job.progress = 1
                 job.state = .done
             } catch {
@@ -337,7 +401,7 @@ final class DownloadManager {
 }
 
 /// SHA-1 d'un gros fichier, lu par morceaux.
-private func sha1(of url: URL) -> String {
+func sha1(of url: URL) -> String {
     guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
     defer { try? handle.close() }
     var hasher = Insecure.SHA1()
@@ -348,19 +412,34 @@ private func sha1(of url: URL) -> String {
 }
 
 /// Téléchargement en plusieurs morceaux en parallèle (requêtes Range), chacun écrit directement à sa place
-/// dans le fichier : bien plus rapide qu'une seule connexion sur les serveurs d'Apple.
+/// dans le fichier. Interrompu (réseau, app quittée, Mac redémarré), il reprend où il en était : l'avancement
+/// de chaque morceau est noté dans « fichier.state » à côté du fichier partiel.
 final class SegmentedDownloader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    static let parts = 8
+    static let parts = 12
+
+    /// Un morceau : de `start` à `end` (inclus), écrit jusqu'à `next`.
+    struct Segment: Codable {
+        let start: Int64
+        let end: Int64
+        var next: Int64
+        var isDone: Bool { next > end }
+    }
+    private struct State: Codable {
+        let url: String
+        let size: Int64
+        var segments: [Segment]
+    }
 
     // Tout est manipulé sur la file (série) des délégués de la session.
     private var session: URLSession?
     private var handle: FileHandle?
-    private var offsets: [Int: Int64] = [:]   // tâche → prochaine position d'écriture
+    private var state: State?
+    private var taskSegment: [Int: Int] = [:]   // tâche → numéro du morceau
     private var written: Int64 = 0
-    private var total: Int64 = 0
     private var remaining = 0
     private var failure: Error?
     private var lastReport = Date.distantPast
+    private var lastSave = Date.distantPast
     private var file: URL?
     private var onProgress: ((Int64, Int64) -> Void)?
     private var continuation: CheckedContinuation<Result<URL, Error>, Never>?
@@ -381,16 +460,37 @@ final class SegmentedDownloader: NSObject, URLSessionDataDelegate, @unchecked Se
         return http.expectedContentLength
     }
 
+    static func stateURL(for file: URL) -> URL { file.appendingPathExtension("state") }
+
     func download(_ url: URL, size: Int64, to file: URL, onProgress: @escaping (Int64, Int64) -> Void) async -> Result<URL, Error> {
-        total = size
         self.file = file
         self.onProgress = onProgress
-        guard FileManager.default.createFile(atPath: file.path, contents: nil),
-              let handle = try? FileHandle(forWritingTo: file) else {
-            return .failure(DownloadError(message: "impossible de créer le fichier"))
+        let fm = FileManager.default
+        // Reprise : même adresse, même taille, fichier partiel présent.
+        var state = (try? Data(contentsOf: Self.stateURL(for: file))).flatMap { try? JSONDecoder().decode(State.self, from: $0) }
+        if state?.url != url.absoluteString || state?.size != size || !fm.fileExists(atPath: file.path) { state = nil }
+        if state == nil {
+            guard fm.createFile(atPath: file.path, contents: nil) else { return .failure(DownloadError(message: "impossible de créer le fichier")) }
+            let chunk = (size + Int64(Self.parts) - 1) / Int64(Self.parts)
+            var segments: [Segment] = []
+            var start: Int64 = 0
+            while start < size {
+                let end = min(start + chunk, size) - 1
+                segments.append(Segment(start: start, end: end, next: start))
+                start = end + 1
+            }
+            state = State(url: url.absoluteString, size: size, segments: segments)
+        }
+        guard let state, let handle = try? FileHandle(forWritingTo: file) else {
+            return .failure(DownloadError(message: "impossible d'ouvrir le fichier"))
         }
         try? handle.truncate(atOffset: UInt64(size))
         self.handle = handle
+        written = state.segments.reduce(0) { $0 + ($1.next - $1.start) }
+        let todo = state.segments.indices.filter { !state.segments[$0].isDone }
+        self.state = state
+        if todo.isEmpty { return finishNow() }
+
         let config = URLSessionConfiguration.default
         config.httpMaximumConnectionsPerHost = Self.parts
         config.timeoutIntervalForRequest = 60
@@ -399,22 +499,33 @@ final class SegmentedDownloader: NSObject, URLSessionDataDelegate, @unchecked Se
         return await withCheckedContinuation { continuation in
             session.delegateQueue.addOperation {
                 self.continuation = continuation
-                let chunk = (size + Int64(Self.parts) - 1) / Int64(Self.parts)
+                self.onProgress?(self.written, size)
                 var tasks: [URLSessionDataTask] = []
-                var start: Int64 = 0
-                while start < size {
-                    let end = min(start + chunk, size) - 1
+                for index in todo {
+                    let segment = state.segments[index]
                     var request = URLRequest(url: url)
-                    request.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
+                    request.setValue("bytes=\(segment.next)-\(segment.end)", forHTTPHeaderField: "Range")
                     let task = session.dataTask(with: request)
-                    self.offsets[task.taskIdentifier] = start
+                    self.taskSegment[task.taskIdentifier] = index
                     tasks.append(task)
-                    start = end + 1
                 }
                 self.remaining = tasks.count
                 tasks.forEach { $0.resume() }
             }
         }
+    }
+
+    /// Tous les morceaux étaient déjà là (reprise d'un téléchargement terminé).
+    private func finishNow() -> Result<URL, Error> {
+        try? handle?.close()
+        if let file { try? FileManager.default.removeItem(at: Self.stateURL(for: file)) }
+        return file.map { .success($0) } ?? .failure(DownloadError(message: "fichier introuvable"))
+    }
+
+    private func saveState() {
+        guard let state, let file, let data = try? JSONEncoder().encode(state) else { return }
+        try? data.write(to: Self.stateURL(for: file), options: .atomic)
+        lastSave = Date()
     }
 
     func cancel() { session?.invalidateAndCancel() }
@@ -430,38 +541,43 @@ final class SegmentedDownloader: NSObject, URLSessionDataDelegate, @unchecked Se
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let offset = offsets[dataTask.taskIdentifier], let handle else { return }
+        guard let index = taskSegment[dataTask.taskIdentifier], var segment = state?.segments[index], let handle else { return }
         do {
-            try handle.seek(toOffset: UInt64(offset))
+            try handle.seek(toOffset: UInt64(segment.next))
             try handle.write(contentsOf: data)
         } catch {
             failure = failure ?? error
             session.invalidateAndCancel()
             return
         }
-        offsets[dataTask.taskIdentifier] = offset + Int64(data.count)
+        segment.next += Int64(data.count)
+        state?.segments[index] = segment
         written += Int64(data.count)
+        if Date().timeIntervalSince(lastSave) > 2 { saveState() }
         if Date().timeIntervalSince(lastReport) > 0.25 {
             lastReport = Date()
-            onProgress?(written, total)
+            onProgress?(written, state?.size ?? 0)
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error, failure == nil {
             failure = error
-            session.invalidateAndCancel()   // un morceau raté : on arrête tout, l'essai suivant repart de zéro
+            session.invalidateAndCancel()   // un morceau raté : on arrête, l'essai suivant reprend où on en est
         }
         remaining -= 1
         guard remaining == 0 else { return }
+        try? handle?.synchronize()
         try? handle?.close()
         session.finishTasksAndInvalidate()
-        if failure == nil && written != total { failure = DownloadError(message: "fichier incomplet") }
+        let complete = state?.segments.allSatisfy(\.isDone) == true
+        if failure == nil && !complete { failure = DownloadError(message: "fichier incomplet") }
         if let failure {
-            if let file { try? FileManager.default.removeItem(at: file) }
+            saveState()   // le fichier partiel est gardé pour reprendre
             finish(.failure(failure))
         } else if let file {
-            onProgress?(written, total)
+            try? FileManager.default.removeItem(at: Self.stateURL(for: file))
+            onProgress?(written, state?.size ?? 0)
             finish(.success(file))
         }
     }

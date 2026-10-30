@@ -70,13 +70,15 @@ enum Agent {
     }
 }
 
-/// Le travail de l'agent : relit les fichiers chaque minute, les versions validées toutes les 5 minutes,
-/// et télécharge ce qui manque quand le téléchargement automatique est activé et que l'app est fermée.
+/// Le travail de l'agent : relit les fichiers toutes les 15 secondes, les versions validées toutes les 5 minutes,
+/// suit en direct les téléchargements de l'app, et télécharge lui-même quand l'app est fermée (si c'est activé).
 @MainActor
 @Observable
 final class AgentModel {
     let model: AppModel
     var items: [AppModel.Needed] = []
+    /// Téléchargements de l'app ouverte, relus toutes les 2 secondes.
+    var external: [SharedDownload] = []
     var lastCheck: Date?
     private let loadedVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
 
@@ -84,14 +86,30 @@ final class AgentModel {
         Shell.interactive = false   // jamais de fenêtre de mot de passe : l'assistant système ou rien
         model = AppModel()
         Task { await loop() }
+        Task { await follow() }
     }
 
-    var downloading: [DownloadJob] { model.downloads.active }
+    /// Tous les téléchargements en cours : ceux de l'agent et ceux de l'app.
+    var downloading: [SharedDownload] {
+        model.downloads.active.map { SharedDownload(key: $0.key, title: $0.title, progress: $0.progress, verifying: $0.state == .verifying) }
+            + external
+    }
     var missing: Int { items.filter { $0.state != .ok }.count }
     var symbol: String {
         if !downloading.isEmpty { return "arrow.down.circle" }
         if items.isEmpty { return "externaldrive" }
         return missing == 0 ? "externaldrive.badge.checkmark" : "externaldrive.badge.exclamationmark"
+    }
+
+    /// Suit les téléchargements de l'app ; quand l'un se termine, la liste est relue tout de suite.
+    private func follow() async {
+        while true {
+            let now = SharedDownloads.others()
+            let finished = Set(external.map(\.key)).subtracting(now.map(\.key))
+            external = now
+            if !finished.isEmpty { await check(download: false) }
+            try? await Task.sleep(for: .seconds(2))
+        }
     }
 
     private func loop() async {
@@ -119,7 +137,7 @@ final class AgentModel {
                 await model.refreshFirmwares()
             }
             await check(download: !appOpen)
-            try? await Task.sleep(for: .seconds(60))
+            try? await Task.sleep(for: .seconds(15))
         }
     }
 
@@ -161,6 +179,20 @@ struct AgentPanel: View {
                     row(item)
                     Text(item.label)
                     Spacer()
+                    if let job = job(for: item) {
+                        Text(job.verifying ? "vérification" : "\(Int(job.progress * 100)) %")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+                .font(.callout)
+            }
+            // Téléchargements qui ne sont pas dans la liste des versions validées.
+            ForEach(agent.downloading.filter { d in !agent.items.contains { job(for: $0)?.key == d.key } }) { d in
+                HStack {
+                    ProgressView(value: d.progress).progressViewStyle(.circular).controlSize(.mini)
+                    Text(d.title).lineLimit(1)
+                    Spacer()
+                    Text("\(Int(d.progress * 100)) %").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 .font(.callout)
             }
@@ -180,25 +212,34 @@ struct AgentPanel: View {
             }
         }
         .padding(14)
-        .frame(width: 320)
+        .frame(width: 340)
+    }
+
+    private func job(for item: AppModel.Needed) -> SharedDownload? {
+        guard let kind = item.download else { return nil }
+        let key = DownloadJob(kind: kind).key
+        return agent.downloading.first { $0.key == key }
     }
 
     private var summary: String {
         if !agent.downloading.isEmpty { return "\(agent.downloading.count) téléchargement(s) en cours" }
         if agent.items.isEmpty { return "Vérification…" }
-        return agent.missing == 0 ? "Toutes les versions validées sont sur ce Mac"
-                                  : "\(agent.missing) version(s) validée(s) manquante(s)"
+        if agent.items.contains(where: { $0.state == .verifying }) { return "Vérification des fichiers…" }
+        return agent.missing == 0 ? "Toutes les versions validées sont sur ce Mac et vérifiées"
+                                  : "\(agent.missing) version(s) validée(s) à télécharger ou à vérifier"
     }
 
     @ViewBuilder
     private func row(_ item: AppModel.Needed) -> some View {
-        if let kind = item.download, let job = agent.downloading.first(where: { $0.key == DownloadJob(kind: kind).key }) {
+        if let job = job(for: item) {
             ProgressView(value: job.progress).progressViewStyle(.circular).controlSize(.mini)
         } else {
             switch item.state {
             case .ok: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             case .misplaced: Image(systemName: "tray.and.arrow.down.fill").foregroundStyle(.orange)
             case .missing: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+            case .verifying: ProgressView().controlSize(.mini)
+            case .corrupted: Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(.red)
             }
         }
     }

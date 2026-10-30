@@ -98,13 +98,10 @@ struct VersionsView: View {
                     Pill(text: "Validée", color: .validated, icon: "checkmark.seal.fill")
                 }
                 LatestPill(chosen: version, latest: latest?.version)
-                if let local = model.library.installer(for: version, build: model.catalog.installer(version: version)?.build) {
-                    local.path.hasPrefix(model.settings.intelFolder + "/")
-                        ? Pill(text: "Sur ce Mac", color: .green, icon: "checkmark.circle")
-                        : Pill(text: "Sur ce Mac, à ranger", color: .orange, icon: "tray.and.arrow.down")
-                } else {
-                    Pill(text: "Sera téléchargé", color: .orange, icon: "arrow.down.circle")
-                }
+                let installer = model.catalog.installer(version: version)
+                let local = model.library.installer(for: version, build: installer?.build)
+                LocalPill(path: local?.path, folder: model.settings.intelFolder, size: installer?.sizeBytes ?? 0,
+                          certification: local.map { model.library.certification($0.path) } ?? .unknown)
             }
         }
     }
@@ -114,6 +111,8 @@ struct VersionsView: View {
     private func summary(_ items: [AppModel.Needed]) -> some View {
         let missing = items.filter { $0.state == .missing }
         let misplaced = items.filter { $0.state == .misplaced }
+        let verifying = items.filter { $0.state == .verifying }
+        let corrupted = items.filter { $0.state == .corrupted }
         let downloading = model.downloads.active.count
         let old = model.obsoleteFiles()
         if !old.isEmpty {
@@ -123,14 +122,22 @@ struct VersionsView: View {
                 Button("Mettre à la corbeille") { Task { await model.library.trash(old) } }
             }
         }
-        if missing.isEmpty && misplaced.isEmpty {
-            Banner(text: "Toutes les versions validées sont sur ce Mac et rangées au bon endroit (\(items.count) éléments).",
+        if missing.isEmpty && misplaced.isEmpty && verifying.isEmpty && corrupted.isEmpty {
+            Banner(text: "Toutes les versions validées sont sur ce Mac, vérifiées intactes et rangées au bon endroit (\(items.count) éléments).",
                    color: .validated, icon: "checkmark.seal.fill")
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 if downloading > 0 {
                     Banner(text: "\(downloading) téléchargement(s) en cours : la page se met à jour dès qu'ils sont terminés.",
                            color: .blue, icon: "arrow.down.circle")
+                }
+                if !verifying.isEmpty {
+                    Banner(text: "Vérification de l'intégrité en cours : " + verifying.map(\.label).joined(separator: ", ") + ".",
+                           color: .secondary, icon: "hourglass")
+                }
+                if !corrupted.isEmpty {
+                    Banner(text: "Fichier abîmé (sera retéléchargé) : " + corrupted.map(\.label).joined(separator: ", ") + ".",
+                           color: .red, icon: "exclamationmark.octagon.fill")
                 }
                 if !missing.isEmpty {
                     Banner(text: "Manquant : " + missing.map(\.label).joined(separator: ", ") + ".")

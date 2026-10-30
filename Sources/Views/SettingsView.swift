@@ -35,7 +35,6 @@ private struct GeneralSettings: View {
             Section("Comportement") {
                 Toggle("Chercher les nouvelles versions au lancement", isOn: $model.settings.checkUpdatesAtLaunch)
                 Toggle("Notifications à la fin des téléchargements et des préparations", isOn: $model.settings.notificationsEnabled)
-                Toggle("Vérifier le SHA-1 des IPSW téléchargés", isOn: $model.settings.verifyChecksums)
                 Toggle("Supprimer les anciens IPSW lors d'une mise à jour de disque", isOn: $model.settings.removeOldOnUpdate)
             }
         }

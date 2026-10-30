@@ -319,7 +319,8 @@ struct MacIPSWRow: View {
             } else if let fw {
                 let latest = model.catalog.signedFirmwares(identifier: settings.macIdentifier).first { $0.version.majorVersion == version.majorVersion }
                 LatestPill(chosen: fw.version, latest: latest?.version)
-                LocalPill(path: local?.path, folder: settings.siliconFolder, size: fw.filesize)
+                LocalPill(path: local?.path, folder: settings.siliconFolder, size: fw.filesize,
+                          certification: local.map { model.library.certification($0.path) } ?? .unknown)
             } else {
                 Text("Aucun IPSW signé").foregroundStyle(.secondary)
             }
@@ -355,7 +356,9 @@ struct IPadRow: View {
                 Pill(text: "Ne sera pas installé", color: .red, icon: "nosign")
             } else if let fw {
                 LatestPill(chosen: fw.version, latest: latest?.version)
-                LocalPill(path: model.library.ipsw(fw, device: device)?.path, folder: model.settings.folder(for: device), size: fw.filesize)
+                let file = model.library.ipsw(fw, device: device)
+                LocalPill(path: file?.path, folder: model.settings.folder(for: device), size: fw.filesize,
+                          certification: file.map { model.library.certification($0.path) } ?? .unknown)
             } else if let file = local.first {
                 Pill(text: "Local : \(file.version ?? file.name)", color: .secondary)
             }
@@ -675,12 +678,21 @@ struct LocalPill: View {
     let path: String?
     let folder: String
     let size: Int64
+    /// « Sur ce Mac » seulement pour un fichier certifié intact.
+    var certification: Library.Certification = .certified
 
     var body: some View {
         if let path {
-            path.hasPrefix(folder + "/")
-                ? Pill(text: "Sur ce Mac", color: .green, icon: "checkmark.circle")
-                : Pill(text: "Sur ce Mac, à ranger", color: .orange, icon: "tray.and.arrow.down")
+            switch certification {
+            case .corrupted:
+                Pill(text: "Abîmé : sera retéléchargé", color: .red, icon: "exclamationmark.octagon.fill")
+            case .checking, .unknown:
+                Pill(text: "Vérification…", color: .secondary, icon: "hourglass")
+            case .certified:
+                path.hasPrefix(folder + "/")
+                    ? Pill(text: "Sur ce Mac", color: .green, icon: "checkmark.seal.fill")
+                    : Pill(text: "Sur ce Mac, à ranger", color: .orange, icon: "tray.and.arrow.down")
+            }
         } else {
             Pill(text: "Sera téléchargé (\(size.fileSize))", color: .orange, icon: "arrow.down.circle")
         }
