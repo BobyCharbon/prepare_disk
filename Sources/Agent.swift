@@ -30,7 +30,14 @@ enum Launcher {
                 exit(0)
             }
         }
-        if agent { AgentApp.main() } else { PrepareDiskApp.main() }
+        if agent {
+            AgentApp.main()   // LSUIElement : jamais dans le Dock
+        } else {
+            // L'app est déclarée LSUIElement (pour que l'agent n'apparaisse pas dans le Dock) : la fenêtre
+            // principale, elle, s'y affiche.
+            NSApplication.shared.setActivationPolicy(.regular)
+            PrepareDiskApp.main()
+        }
     }
 }
 

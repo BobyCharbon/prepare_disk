@@ -25,6 +25,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleExecutable</key><string>PrepareDisk</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>LSUIElement</key><true/>
     <key>CFBundleVersion</key><string>$VERSION</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>

@@ -3,6 +3,10 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.8 — 2 novembre 2026
+
+- Une seule icône Prepare Disk dans le Dock : l'icône de la barre des menus n'y apparaît plus comme une deuxième app.
+
 ## 1.5.7 — 2 novembre 2026
 
 - Accès complet au disque : mieux détecté sur un compte récent (le bandeau rouge restait affiché alors que l'accès était activé).
