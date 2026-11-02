@@ -3,6 +3,10 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.7 — 2 novembre 2026
+
+- Accès complet au disque : mieux détecté sur un compte récent (le bandeau rouge restait affiché alors que l'accès était activé).
+
 ## 1.5.6 — 2 novembre 2026
 
 - Désinstallation complète : Réglages › Général › Désinstaller…, ou dans le Terminal avec `curl -fsSL https://raw.githubusercontent.com/BobyCharbon/prepare_disk/main/uninstall.sh | bash`.

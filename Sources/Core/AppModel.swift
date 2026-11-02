@@ -242,8 +242,11 @@ final class AppModel {
     // MARK: Accès complet au disque
 
     /// Le fichier TCC.db n'est lisible qu'avec l'accès complet au disque.
+    /// Celui de l'utilisateur n'existe pas toujours sur un compte récent : celui du système, toujours présent, d'abord.
     static func checkFullDiskAccess() -> Bool {
-        FileHandle(forReadingAtPath: NSHomeDirectory() + "/Library/Application Support/com.apple.TCC/TCC.db") != nil
+        ["/Library/Application Support/com.apple.TCC/TCC.db",
+         NSHomeDirectory() + "/Library/Application Support/com.apple.TCC/TCC.db"]
+            .contains { FileHandle(forReadingAtPath: $0) != nil }
     }
 
     func openFullDiskAccessSettings() {
