@@ -78,6 +78,11 @@ enum Shell {
         var message = "Prepare Disk a besoin de votre mot de passe administrateur pour écrire sur le disque."
         while true {
             guard let password = askPassword(message) else { return (true, "") }
+            // sudo (et macOS en général) refuse toujours un mot de passe vide pour les droits administrateur.
+            if password.isEmpty {
+                message = "macOS refuse un mot de passe vide pour les droits administrateur. Si ce compte n'a pas de mot de passe, définissez-en un dans Réglages Système › Utilisateurs et groupes, puis réessayez."
+                continue
+            }
             if await sudo(["-v"], password: password).status == 0 {
                 return (false, await sudo(["/bin/bash", "-c", command], password: password).output)
             }

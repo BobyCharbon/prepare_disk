@@ -1,7 +1,7 @@
 #!/bin/bash
 # Assistant de Prepare Disk : seules ces opérations sont permises en root, sans mot de passe.
 # Installé une fois (mot de passe administrateur), il se met ensuite à jour tout seul depuis l'app signée.
-HELPER_VERSION=3
+HELPER_VERSION=4
 HELPER=/Library/PrivilegedHelperTools/com.bobycharbon.preparedisk.helper
 TEAM='identifier "com.bobycharbon.preparedisk" and anchor apple generic and certificate leaf[subject.OU] = "GS2B6GA9JA"'
 set -u
@@ -63,6 +63,12 @@ case "${1:-}" in
         [[ "$src" == /Applications/* || "$src" == /Users/* ]] && [[ "$dst" == /Users/* ]] || refuse "déplacement"
         mkdir -p "$(dirname "$dst")"
         exec mv -n "$src" "$dst" ;;
+    uninstall)
+        # Désinstallation : l'app de /Applications, les autorisations système, la règle sudo et l'assistant lui-même.
+        rm -rf "/Applications/Prepare Disk.app"
+        tccutil reset All com.bobycharbon.preparedisk >/dev/null 2>&1
+        rm -f /etc/sudoers.d/preparedisk
+        exec rm -f "$HELPER" ;;
     *)
         refuse "commande ${1:-}" ;;
 esac

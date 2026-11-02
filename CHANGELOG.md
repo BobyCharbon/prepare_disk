@@ -3,6 +3,12 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.6 — 2 novembre 2026
+
+- Désinstallation complète : Réglages › Général › Désinstaller…, ou dans le Terminal avec `curl -fsSL https://raw.githubusercontent.com/BobyCharbon/prepare_disk/main/uninstall.sh | bash`.
+- L'icône de la barre des menus se réinstalle toute seule si elle a été arrêtée.
+- Mot de passe administrateur laissé vide : un message explique que macOS l'exige.
+
 ## 1.5.5 — 2 novembre 2026
 
 - Correction : l'app s'ouvre de nouveau quand l'icône de la barre des menus est en marche (y compris après « Relancer »).

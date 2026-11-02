@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -37,8 +38,37 @@ private struct GeneralSettings: View {
                 Toggle("Notifications à la fin des téléchargements et des préparations", isOn: $model.settings.notificationsEnabled)
                 Toggle("Supprimer les anciens IPSW lors d'une mise à jour de disque", isOn: $model.settings.removeOldOnUpdate)
             }
+            Section("Désinstallation") {
+                HStack {
+                    Text("Supprime toute trace de Prepare Disk sur ce Mac : app, icône de la barre des menus, réglages, autorisations.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Désinstaller…", role: .destructive, action: uninstall)
+                }
+            }
         }
         .formStyle(.grouped)
+    }
+
+    /// Lance uninstall.sh (livré dans l'app) puis l'app est arrêtée par le script lui-même.
+    private func uninstall() {
+        let alert = NSAlert()
+        alert.messageText = "Désinstaller Prepare Disk ?"
+        alert.informativeText = "L'app, l'icône de la barre des menus, l'assistant système, les réglages et les autorisations seront supprimés de ce Mac."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Désinstaller")
+        alert.addButton(withTitle: "Annuler")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Supprimer aussi les fichiers téléchargés (~/prepare_disk)"
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let script = Bundle.main.path(forResource: "uninstall", ofType: "sh") else { return }
+        Task {
+            try? await SMAppService.agent(plistName: Agent.plist).unregister()   // retire aussi l'entrée « en arrière-plan »
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [script] + (alert.suppressionButton?.state == .on ? ["--all"] : [])
+            try? process.run()
+        }
     }
 
     private func chooseFolder() {

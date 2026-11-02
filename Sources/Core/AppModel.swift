@@ -207,7 +207,10 @@ final class AppModel {
     func registerAgent() async {
         let agent = SMAppService.agent(plistName: Agent.plist)
         let path = Bundle.main.bundlePath
-        if UserDefaults.standard.string(forKey: "agentRegisteredPath") != path {
+        // Inscrit mais pas lancé (ex. après un « launchctl bootout ») : macOS le croit actif et ne le relance
+        // jamais. On le réinscrit alors, comme après un changement d'emplacement de l'app.
+        let loaded = await Shell.run("/bin/launchctl", ["print", "gui/\(getuid())/com.bobycharbon.preparedisk.agent"]).status == 0
+        if UserDefaults.standard.string(forKey: "agentRegisteredPath") != path || (agent.status == .enabled && !loaded) {
             try? await agent.unregister()
         }
         if agent.status != .enabled {
