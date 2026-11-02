@@ -3,6 +3,10 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.5 — 2 novembre 2026
+
+- Correction : l'app s'ouvre de nouveau quand l'icône de la barre des menus est en marche (y compris après « Relancer »).
+
 ## 1.5.4 — 2 novembre 2026
 
 - Mise à jour possible sans mot de passe administrateur : la nouvelle version s'installe alors dans le dossier Applications de l'utilisateur.

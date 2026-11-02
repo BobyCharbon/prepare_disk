@@ -17,10 +17,18 @@ enum Launcher {
             exit(0)
         }
         // Une seule fenêtre Prepare Disk : un deuxième lancement ramène celle déjà ouverte.
-        if !agent, let other = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
-            .first(where: { $0.processIdentifier != getpid() && $0.activationPolicy == .regular }) {
-            other.activate()
-            exit(0)
+        // L'agent se note par son numéro de processus : vu d'ailleurs, il passe pour une app normale.
+        let agentPid = NSHomeDirectory() + "/Library/Application Support/PrepareDisk/agent-process.pid"
+        if agent {
+            try? FileManager.default.createDirectory(atPath: (agentPid as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try? String(getpid()).write(toFile: agentPid, atomically: true, encoding: .utf8)
+        } else {
+            let agentProcess = (try? String(contentsOfFile: agentPid, encoding: .utf8)).flatMap { Int32($0) }
+            if let other = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+                .first(where: { $0.processIdentifier != getpid() && $0.processIdentifier != agentProcess && $0.activationPolicy == .regular }) {
+                other.activate()
+                exit(0)
+            }
         }
         if agent { AgentApp.main() } else { PrepareDiskApp.main() }
     }
