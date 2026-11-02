@@ -68,6 +68,13 @@ enum Shell {
     @MainActor
     static func runAsAdmin(_ command: String) async -> (cancelled: Bool, output: String) {
         guard interactive else { return (true, "") }   // agent en arrière-plan : pas de fenêtre de mot de passe
+        // Compte standard : sudo refuse son propre mot de passe. La fenêtre système demande alors le nom
+        // et le mot de passe d'un administrateur.
+        if !(await run("/usr/bin/id", ["-Gn"]).output.split(whereSeparator: \.isWhitespace).contains("admin")) {
+            let script = "do shell script \"\(command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\" with administrator privileges"
+            let result = await run("/usr/bin/osascript", ["-e", script])
+            return (result.output.contains("-128"), result.output)
+        }
         var message = "Prepare Disk a besoin de votre mot de passe administrateur pour écrire sur le disque."
         while true {
             guard let password = askPassword(message) else { return (true, "") }

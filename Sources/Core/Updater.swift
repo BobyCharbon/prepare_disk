@@ -79,6 +79,7 @@ final class Updater {
     func install(relaunch: Bool = true) async {
         guard let release else { return }
         state = .downloading(0)
+        await Self.removeLeftovers()
         let result = await FileDownloader().download(release.download) { written, total in
             Task { @MainActor in if total > 0 { self.state = .downloading(Double(written) / Double(total)) } }
         }
@@ -96,21 +97,44 @@ final class Updater {
             return fail("la signature de la nouvelle version n'est pas la bonne.")
         }
 
-        let current = Bundle.main.bundlePath
+        var current = Bundle.main.bundlePath
         if !Self.replace(current, with: newApp) {
             // Pas le droit d'écrire ici : l'assistant système (sans mot de passe) s'en charge.
-            guard let helper, helper.isReady, await helper.run(["update", newApp, current]).status == 0 else {
+            if let helper, helper.isReady, await helper.run(["update", newApp, current]).status == 0 {
+            } else if let copy = Self.installForUser(newApp) {
+                // Pas d'administrateur : la nouvelle version va dans ~/Applications, et l'ancienne y renvoie.
+                current = copy
+            } else {
                 return fail("impossible de remplacer l'app (droits insuffisants). Faites la « Configuration unique », ou installez la nouvelle version à la main.")
             }
         }
-        try? FileManager.default.removeItem(atPath: folder)
+        await Self.removeLeftovers()
         guard relaunch else { return }   // agent : la nouvelle version servira au prochain lancement
-        // Relance une fois cette instance fermée.
+        Self.relaunch(current)
+    }
+
+    /// Relance l'app une fois cette instance fermée.
+    static func relaunch(_ path: String = Bundle.main.bundlePath) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 1; /usr/bin/open \(Shell.quote(current))"]
+        process.arguments = ["-c", "sleep 1; /usr/bin/open \(Shell.quote(path))"]
         try? process.run()
         NSApp.terminate(nil)
+    }
+
+    /// Supprime les versions téléchargées restées dans le dossier temporaire (une par essai raté) et les retire
+    /// de la liste des apps de macOS : sinon elles s'empilent dans le Launchpad et « Ouvrir avec ».
+    private static func removeLeftovers() async {
+        let tmp = FileManager.default.temporaryDirectory
+        let folders = (try? FileManager.default.contentsOfDirectory(atPath: tmp.path))?.filter { $0.hasPrefix("PrepareDisk-update-") } ?? []
+        for name in folders {
+            let folder = tmp.appendingPathComponent(name).path
+            for app in (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? [] where app.hasSuffix(".app") {
+                _ = await Shell.run("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                                    ["-u", folder + "/" + app])
+            }
+            try? FileManager.default.removeItem(atPath: folder)
+        }
     }
 
     /// Remplace l'app sur place ; l'ancienne version est supprimée (pas mise à la corbeille). Remise en place si échec.
@@ -131,6 +155,26 @@ final class Updater {
             try? fm.moveItem(atPath: old, toPath: current)
             return false
         }
+    }
+
+    /// Copie de l'app dans le dossier Applications de l'utilisateur, toujours modifiable sans mot de passe.
+    nonisolated static let userCopy = NSHomeDirectory() + "/Applications/Prepare Disk.app"
+
+    private static func installForUser(_ newApp: String) -> String? {
+        let fm = FileManager.default
+        guard Bundle.main.bundlePath != userCopy else { return nil }
+        try? fm.createDirectory(atPath: (userCopy as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? fm.removeItem(atPath: userCopy)
+        return (try? fm.moveItem(atPath: newApp, toPath: userCopy)) != nil ? userCopy : nil
+    }
+
+    /// Une version plus récente attend dans ~/Applications (mise à jour faite sans administrateur).
+    nonisolated static var newerUserCopy: String? {
+        guard Bundle.main.bundlePath != userCopy,
+              let version = Bundle(path: userCopy)?.infoDictionary?["CFBundleShortVersionString"] as? String,
+              let mine = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              version.isNewerVersion(than: mine) else { return nil }
+        return userCopy
     }
 
     private func fail(_ reason: String) {

@@ -170,8 +170,22 @@ private struct MandatoryUpdateView: View {
                         Text("Installation, l'app va redémarrer…").font(.caption).foregroundStyle(.secondary)
                     case let .failed(message):
                         Text(message).multilineTextAlignment(.center).foregroundStyle(.red).frame(maxWidth: 420)
+                        if let error = updater.helper?.error {
+                            Text(error).font(.caption).multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 420).lineLimit(3)
+                        }
                         HStack {
-                            Button("Réessayer") { Task { await updater.install() } }.buttonStyle(.borderedProminent)
+                            if let helper = updater.helper, !helper.isReady {
+                                // Sans la configuration unique, l'app ne peut pas se remplacer (compte standard,
+                                // dossier Applications protégé) : on la propose ici, l'app étant bloquée derrière.
+                                Button(helper.isInstalling ? "Configuration…" : "Configurer (mot de passe administrateur)") {
+                                    Task {
+                                        await helper.install()
+                                        if helper.isReady { await updater.install() }
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent).disabled(helper.isInstalling)
+                            }
+                            Button("Réessayer") { Task { await updater.install() } }
                             Link("Télécharger à la main", destination: URL(string: "https://github.com/\(Updater.repository)/releases/latest")!)
                         }
                     default:

@@ -209,6 +209,7 @@ struct SetupChecklist: View {
         let title: String
         let detail: String
         let button: String
+        var second: (String, () -> Void)? = nil
         let action: () -> Void
     }
 
@@ -216,8 +217,9 @@ struct SetupChecklist: View {
         var items: [Item] = []
         if !model.hasFullDiskAccess {
             items.append(Item(id: "fda", icon: "lock.trianglebadge.exclamationmark.fill", title: "Accès complet au disque",
-                              detail: "Sans lui, macOS bloque la création des disques bootables. Ajoutez Prepare Disk dans la liste et activez-le.",
-                              button: "Ouvrir Accès complet au disque") { model.openFullDiskAccessSettings() })
+                              detail: "Sans lui, macOS bloque la création des disques bootables. Ajoutez Prepare Disk dans la liste et activez-le, puis relancez l'app : macOS ne l'applique qu'au lancement suivant.",
+                              button: "Ouvrir Accès complet au disque",
+                              second: ("Relancer", { Updater.relaunch() })) { model.openFullDiskAccessSettings() })
         }
         if !model.helper.isReady {
             items.append(Item(id: "helper", icon: "key.fill", title: "Configuration unique du mot de passe",
@@ -253,6 +255,7 @@ struct SetupChecklist: View {
                             Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                         }
                         Spacer()
+                        if let (title, action) = item.second { Button(title, action: action) }
                         Button(item.button, action: item.action)
                             .buttonStyle(.borderedProminent).tint(.red)
                             .disabled(item.id == "helper" && model.helper.isInstalling)

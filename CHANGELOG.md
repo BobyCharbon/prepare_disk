@@ -3,6 +3,13 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.4 — 2 novembre 2026
+
+- Mise à jour possible sans mot de passe administrateur : la nouvelle version s'installe alors dans le dossier Applications de l'utilisateur.
+- Plus de copies de l'app qui s'empilent après une mise à jour ratée, et une seule fenêtre Prepare Disk à la fois.
+- Accès complet au disque : un bouton « Relancer », car macOS ne l'applique qu'au lancement suivant.
+- Sur un compte standard, la configuration unique demande le nom et le mot de passe d'un administrateur.
+
 ## 1.5.3 — 2 novembre 2026
 
 - Correction de l'affichage sur un Mac neuf : la fenêtre n'est plus coupée en haut et les onglets de gauche s'affichent de nouveau.

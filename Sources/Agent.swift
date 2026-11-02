@@ -5,7 +5,24 @@ import SwiftUI
 @main
 enum Launcher {
     static func main() {
-        if CommandLine.arguments.contains("--agent") { AgentApp.main() } else { PrepareDiskApp.main() }
+        let agent = CommandLine.arguments.contains("--agent")
+        // Ancienne copie (ex. /Applications sans droit d'écriture) : on passe la main à la version à jour
+        // dans ~/Applications. Pour l'agent, l'app s'ouvre cachée et réinstalle l'agent depuis la nouvelle copie.
+        if let newer = Updater.newerUserCopy {
+            let open = Process()
+            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            open.arguments = (agent ? ["-g", "-j"] : []) + [newer]
+            try? open.run()
+            open.waitUntilExit()
+            exit(0)
+        }
+        // Une seule fenêtre Prepare Disk : un deuxième lancement ramène celle déjà ouverte.
+        if !agent, let other = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+            .first(where: { $0.processIdentifier != getpid() && $0.activationPolicy == .regular }) {
+            other.activate()
+            exit(0)
+        }
+        if agent { AgentApp.main() } else { PrepareDiskApp.main() }
     }
 }
 
