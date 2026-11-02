@@ -249,7 +249,8 @@ struct SetupChecklist: View {
                         Image(systemName: item.icon).foregroundStyle(.red).frame(width: 22)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title).fontWeight(.semibold)
-                            Text(item.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            // Pas de fixedSize : mesuré à largeur nulle, le texte gonflait la fenêtre au-delà de l'écran.
+                            Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                         }
                         Spacer()
                         Button(item.button, action: item.action)

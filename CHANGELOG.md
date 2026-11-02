@@ -3,6 +3,10 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.3 — 2 novembre 2026
+
+- Correction de l'affichage sur un Mac neuf : la fenêtre n'est plus coupée en haut et les onglets de gauche s'affichent de nouveau.
+
 ## 1.5.2 — 30 octobre 2026
 
 - Icône de la barre des menus plus lisible : un grand ✓ quand tout est à jour, une flèche pendant un téléchargement, un « ! » s'il manque quelque chose.
