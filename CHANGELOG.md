@@ -3,6 +3,16 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.9 — 3 novembre 2026
+
+- Mémoire : la vérification des IPSW ne prend plus des Go de RAM (jusqu'à faire planter un Mac au premier lancement).
+- Téléchargements : un fichier n'est plus téléchargé deux fois en même temps (par l'app et l'icône de la barre des menus, ou pendant la pause avant un nouvel essai).
+- « Tout télécharger » (IPSW et loops) ne prend plus les IPSW décochés, qui étaient supprimés juste après.
+- Une page d'erreur du serveur n'est plus prise pour un téléchargement réussi.
+- L'icône de la barre des menus se réinstalle si elle ne démarre plus après une réinstallation de l'app.
+- Assistant système plus strict sur les chemins (mis à jour tout seul, sans mot de passe).
+- Messages plus justes : mot de passe annulé, mot de passe non demandé quand l'assistant est configuré.
+
 ## 1.5.8 — 2 novembre 2026
 
 - Une seule icône Prepare Disk dans le Dock : l'icône de la barre des menus n'y apparaît plus comme une deuxième app.

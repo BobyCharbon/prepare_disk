@@ -41,7 +41,7 @@ extension DownloadsView {
     /// Le temps restant pour tout : octets restants (en cours et en attente) ÷ vitesse totale actuelle.
     /// Plus juste que la somme des temps de chaque fichier, puisqu'ils se partagent la connexion.
     var totalSummary: String? {
-        let mine = model.downloads.active
+        let mine = model.downloads.active.filter { !$0.waitingForOther }   // déjà compté chez l'autre processus
         let others = model.downloads.external
         guard !mine.isEmpty || !others.isEmpty else { return nil }
         let remaining = mine.reduce(0.0) { $0 + Double($1.totalBytes) * (1 - $1.progress) }
@@ -92,6 +92,7 @@ struct DownloadRow: View {
     private var stateText: String {
         switch job.state {
         case .queued:
+            if job.waitingForOther { return "Déjà en cours en arrière-plan : en attente" }
             guard let reason = job.retryReason else { return "En attente" }
             return reason.hasPrefix("connexion perdue") ? "Connexion perdue : reprise dès le retour du réseau"
                                                         : "Échec (\(reason)) : nouvel essai \(job.attempt)/\(DownloadJob.maxAttempts)…"

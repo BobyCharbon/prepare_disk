@@ -1,12 +1,14 @@
 #!/bin/bash
 # Assistant de Prepare Disk : seules ces opérations sont permises en root, sans mot de passe.
 # Installé une fois (mot de passe administrateur), il se met ensuite à jour tout seul depuis l'app signée.
-HELPER_VERSION=4
+HELPER_VERSION=5
 HELPER=/Library/PrivilegedHelperTools/com.bobycharbon.preparedisk.helper
 TEAM='identifier "com.bobycharbon.preparedisk" and anchor apple generic and certificate leaf[subject.OU] = "GS2B6GA9JA"'
 set -u
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 refuse() { echo "Assistant : refusé ($*)" >&2; exit 2; }
+# Aucun « .. » : « /Users/../etc » passerait sinon la vérification du dossier.
+for arg in "$@"; do [[ "/$arg/" == */../* ]] && refuse "chemin $arg"; done
 # Disque ou volume externe et physique uniquement (jamais le disque interne).
 external() {
     local info

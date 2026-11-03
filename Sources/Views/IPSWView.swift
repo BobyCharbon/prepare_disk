@@ -121,18 +121,10 @@ struct IPSWView: View {
     }
 
     private func downloadAllMissing() {
-        let settings = model.settings
-        for (slot, version) in settings.selected.enumerated() where !version.isEmpty {
-            if let fw = model.catalog.macFirmware(identifier: settings.macIdentifier, version: version, pinned: settings.macIPSWVersions[slot]),
-               fw.signed, model.library.ipsw(fw, device: nil) == nil {
-                model.downloads.enqueue(.ipsw(fw, destination: settings.macIPSWPath(fw.version)))
-            }
-        }
-        for device in settings.enabledDevices {
-            if let fw = model.catalog.iPadFirmware(device), fw.signed,
-               model.library.ipsw(fw, device: device) == nil {
-                model.downloads.enqueue(.ipsw(fw, destination: settings.ipswPath(device, fw.version)))
-            }
+        // Les IPSW de la liste validée seulement : un emplacement décoché (« non copié sur le disque ») n'est pas
+        // téléchargé, sinon le nettoyage des anciennes versions le supprimerait juste après.
+        for kind in model.validatedChecklist().compactMap(\.download) {
+            if case .ipsw = kind { model.downloads.enqueue(kind) }
         }
         model.page = .downloads
     }

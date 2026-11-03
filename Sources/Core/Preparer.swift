@@ -74,6 +74,7 @@ final class Preparer {
     /// Assistant système : une fois configuré, le script tourne sans mot de passe.
     var helper: Helper?
     private var stopFile: URL?
+    private var passwordCancelled = false
 
     init(settings: AppSettings, catalog: Catalog, library: Library, downloads: DownloadManager,
          disks: DiskStore, history: HistoryStore, log: LogStore, notifier: Notifier) {
@@ -230,6 +231,7 @@ final class Preparer {
         estimatedDuration = history.averageSecondsPerSystem * Double(plan.systems.count * targets.count)
             + Double(plan.dataBytes * Int64(targets.count)) / 80_000_000
         let failedDisks = await runScript(script)
+        guard !passwordCancelled else { return fail("Mot de passe administrateur annulé : rien n'a été modifié.") }
         guard !stopRequested else { return fail("Arrêté à la demande. Les disques sont incomplets.") }
 
         phase = .verifying
@@ -273,6 +275,7 @@ final class Preparer {
                       dataPartition: inspection.disk.dataPartition?.id, remove: obsolete)
         estimatedDuration = history.averageSecondsPerSystem * Double(installers.count) + Double(plan.dataBytes) / 80_000_000
         let failed = await runScript(script)
+        guard !passwordCancelled else { return fail("Mot de passe administrateur annulé : rien n'a été modifié.") }
         guard !stopRequested else { return fail("Arrêté à la demande.") }
 
         phase = .verifying
@@ -357,8 +360,11 @@ final class Preparer {
             guard let handle = try? FileHandle(forReadingFrom: logURL) else { return }
             defer { try? handle.close() }
             try? handle.seek(toOffset: offset)
-            guard let data = try? handle.readToEnd(), !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            offset += UInt64(data.count)
+            // Seulement les lignes complètes : une ligne coupée (« @@FAIL dis » puis « k4 ») serait mal lue.
+            guard let data = try? handle.readToEnd(), let end = data.lastIndex(of: UInt8(ascii: "\n")) else { return }
+            let complete = data[...end]
+            offset += UInt64(complete.count)
+            let text = String(decoding: complete, as: UTF8.self)
             for line in text.components(separatedBy: "\n") {
                 if line.hasPrefix("==> ") {
                     stepIndex = min(stepIndex + 1, stepCount)
@@ -389,8 +395,8 @@ final class Preparer {
         log.ingest("\n")
         stopFile = nil
         notifier.setDockProgress(nil)
+        passwordCancelled = result.cancelled
         if result.cancelled {
-            stopRequested = true
             log.add("ATTENTION : mot de passe administrateur refusé, rien n'a été modifié.")
         }
         return failed
@@ -454,7 +460,6 @@ struct ScriptBuilder {
     private mutating func line(_ text: String) { body += "    " + text + "\n" }
 
     mutating func erase(disk: String, plan: Plan) {
-        let dev = "/dev/" + disk
         body += "prepare_\(disk)() {\n"
         line("RC=0")
         step("\(disk) : effacement et partitionnement")

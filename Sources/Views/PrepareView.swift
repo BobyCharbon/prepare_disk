@@ -531,7 +531,8 @@ private struct SummaryStep: View {
                         InfoRow(label: "Téléchargements", value: "\(plan.downloads.count) élément(s), \(plan.downloadBytes.fileSize)")
                     }
                     InfoRow(label: "Écriture", value: "≈ \(formatDuration(writing))")
-                    InfoRow(label: "Mot de passe", value: "Demandé une seule fois, au début de l'écriture")
+                    InfoRow(label: "Mot de passe", value: model.helper.isReady ? "Aucun (assistant système configuré)"
+                                                                               : "Demandé une seule fois, au début de l'écriture")
                 }
             }
         }

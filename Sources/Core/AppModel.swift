@@ -209,7 +209,9 @@ final class AppModel {
         let path = Bundle.main.bundlePath
         // Inscrit mais pas lancé (ex. après un « launchctl bootout ») : macOS le croit actif et ne le relance
         // jamais. On le réinscrit alors, comme après un changement d'emplacement de l'app.
-        let loaded = await Shell.run("/bin/launchctl", ["print", "gui/\(getuid())/com.bobycharbon.preparedisk.agent"]).status == 0
+        // Idem s'il ne démarre plus (EX_CONFIG : l'app a été supprimée puis remise au même endroit).
+        let job = await Shell.run("/bin/launchctl", ["print", "gui/\(getuid())/com.bobycharbon.preparedisk.agent"])
+        let loaded = job.status == 0 && (job.output.contains("state = running") || !job.output.contains("EX_CONFIG"))
         if UserDefaults.standard.string(forKey: "agentRegisteredPath") != path || (agent.status == .enabled && !loaded) {
             try? await agent.unregister()
         }
@@ -277,7 +279,8 @@ final class AppModel {
                                 "macOS " + list.macOS.filter { !$0.isEmpty }.joined(separator: ", ") + ". Ouvrez Versions validées pour les télécharger.")
             }
             checkForUpdates(notify: false)
-            autoDownloadTick()
+            // L'icône de la barre des menus ne télécharge pas pendant que l'app est ouverte : l'app s'en charge.
+            if Shell.interactive || !Agent.appIsOpen { autoDownloadTick() }
         }
     }
 

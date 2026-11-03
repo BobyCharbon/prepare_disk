@@ -99,7 +99,9 @@ private struct MacOSSettings: View {
                         model.settings.selected = Array((picks + ["", "", ""]).prefix(3))
                         model.checkForUpdates(notify: false)
                     }
+                    .disabled(!model.canEditVersions)
                     Button("Dernière version de chacun") { model.useLatestVersions() }
+                        .disabled(!model.canEditVersions)
                     Spacer()
                     if model.catalog.isLoadingInstallers { ProgressView().controlSize(.small) }
                     Button("Actualiser") { Task { await model.catalog.loadInstallers() } }
@@ -244,7 +246,7 @@ private struct AdminSettings: View {
         Form {
             if model.validated.hasToken {
                 Section("Administrateur") {
-                    Text("Changez les versions dans « Versions validées », puis cliquez sur « Publier pour tout le monde ». Les autres Mac les reçoivent au démarrage ou dans les 30 minutes.")
+                    Text("Changez les versions dans « Versions validées », puis cliquez sur « Publier pour tout le monde ». Les autres Mac les reçoivent au démarrage ou dans les 5 minutes.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("Mode administrateur", isOn: Binding(get: { model.validated.adminMode }, set: { model.setAdminMode($0) }))
                     Button("Oublier le jeton de ce Mac", role: .destructive) {

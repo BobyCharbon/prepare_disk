@@ -30,6 +30,8 @@ final class DownloadJob: Identifiable {
     var retryReason: String?
     /// Le dernier échec vient d'une coupure réseau : on attend le retour de la connexion, sans compter d'essai.
     var networkLost = false
+    /// L'autre processus (l'app ou l'icône) télécharge déjà ce fichier : on attend qu'il finisse.
+    var waitingForOther = false
     /// Dernière mesure (date, octets reçus) pour calculer la vitesse actuelle.
     var sample: (date: Date, bytes: Double)?
 
@@ -113,7 +115,8 @@ enum SharedDownloads {
     @MainActor
     static func publish(_ jobs: [DownloadJob]) {
         let file = folder.appendingPathComponent("\(getpid()).json")
-        let active = jobs.filter { !$0.isFinished }
+        // Un téléchargement qui attend l'autre processus n'est pas annoncé : sinon chacun attendrait l'autre.
+        let active = jobs.filter { !$0.isFinished && !$0.waitingForOther }
         if active.isEmpty { try? FileManager.default.removeItem(at: file); return }
         let shared = active.map(shared)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -167,6 +170,9 @@ final class DownloadManager {
     /// Téléchargements simultanés (un seul macOS à la fois : softwareupdate ne sait pas en faire deux).
     static let maxParallel = 3
     private var runningCount = 0
+    /// Téléchargements déjà lancés : « en attente » pendant une pause avant un nouvel essai, ils ne doivent pas
+    /// être relancés une seconde fois.
+    private var started: Set<UUID> = []
     /// Empêche la mise en veille tant qu'un téléchargement tourne.
     private var awake: NSObjectProtocol?
     private var succeededSinceIdle = false
@@ -221,9 +227,11 @@ final class DownloadManager {
                 }
             }
             runningCount += 1
+            started.insert(job.id)
             job.state = .running
             Task {
                 await run(job)
+                started.remove(job.id)
                 runningCount -= 1
                 schedule()
                 if runningCount == 0 {
@@ -242,7 +250,7 @@ final class DownloadManager {
             return false
         }
         return jobs.first { job in
-            guard job.state == .queued else { return false }
+            guard job.state == .queued, !started.contains(job.id) else { return false }
             if case .macOS = job.kind { return !macOSRunning }
             return true
         }
@@ -250,6 +258,22 @@ final class DownloadManager {
 
     /// Un téléchargement, relancé tout seul en cas d'échec (jusqu'à `maxAttempts` essais).
     private func run(_ job: DownloadJob) async {
+        // Deux processus qui écrivent le même fichier partiel l'abîment : on laisse l'autre finir.
+        if SharedDownloads.others().contains(where: { $0.key == job.key }) {
+            job.waitingForOther = true
+            job.state = .queued
+            while SharedDownloads.others().contains(where: { $0.key == job.key }) && job.state != .cancelled {
+                try? await Task.sleep(for: .seconds(2))
+            }
+            job.waitingForOther = false
+            if job.state == .cancelled { return }
+            await library.scan()
+            if isAlreadyThere(job) {
+                job.progress = 1
+                job.state = .done
+                return
+            }
+        }
         while true {
             job.state = .running
             job.startedAt = Date()
@@ -287,6 +311,14 @@ final class DownloadManager {
             notifier.notify("Téléchargement terminé", job.title)
         case let .failed(reason): notifier.notify("Téléchargement échoué", "\(job.title) : \(reason)", isError: true)
         default: break
+        }
+    }
+
+    /// Le fichier est arrivé (téléchargé par l'autre processus).
+    private func isAlreadyThere(_ job: DownloadJob) -> Bool {
+        switch job.kind {
+        case let .macOS(installer): return library.installer(matching: installer)?.path.hasPrefix(settings.intelFolder + "/") == true
+        case let .ipsw(_, destination): return FileManager.default.fileExists(atPath: destination)
         }
     }
 
@@ -495,13 +527,17 @@ final class DownloadManager {
 }
 
 /// SHA-1 d'un gros fichier, lu par morceaux.
+/// Chaque morceau est libéré tout de suite (autoreleasepool) : sans ça, ils restaient en mémoire jusqu'à la fin,
+/// soit des Go de RAM par IPSW (14 Go et un Mac planté au premier lancement, quand tout est vérifié).
 func sha1(of url: URL) -> String {
     guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
     defer { try? handle.close() }
     var hasher = Insecure.SHA1()
-    while let chunk = try? handle.read(upToCount: 8 * 1024 * 1024), !chunk.isEmpty {
+    while autoreleasepool(invoking: {
+        guard let chunk = try? handle.read(upToCount: 8 * 1024 * 1024), !chunk.isEmpty else { return false }
         hasher.update(data: chunk)
-    }
+        return true
+    }) {}
     return hasher.finalize().map { String(format: "%02x", $0) }.joined()
 }
 
@@ -708,6 +744,10 @@ final class FileDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sen
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        // Une page d'erreur (404…) n'est pas le fichier demandé.
+        if let status = (downloadTask.response as? HTTPURLResponse)?.statusCode, !(200...299).contains(status) {
+            return finish(.failure(URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "erreur \(status) du serveur"])))
+        }
         // Le fichier temporaire est supprimé au retour : on le déplace tout de suite.
         let kept = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ipsw")
         do {
