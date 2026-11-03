@@ -3,6 +3,10 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.10 — 3 novembre 2026
+
+- Bouton pause dans l'icône de la barre des menus : les téléchargements s'arrêtent pendant 1 heure, puis reprennent tout seuls où ils en étaient. Le bouton lecture les relance tout de suite.
+
 ## 1.5.9 — 3 novembre 2026
 
 - Mémoire : la vérification des IPSW ne prend plus des Go de RAM (jusqu'à faire planter un Mac au premier lancement).

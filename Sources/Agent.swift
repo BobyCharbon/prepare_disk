@@ -112,6 +112,8 @@ final class AgentModel {
     /// Téléchargements de l'app ouverte, relus toutes les 2 secondes.
     var external: [SharedDownload] = []
     var lastCheck: Date?
+    /// Fin de la pause du téléchargement automatique (nil : pas en pause).
+    var pausedUntil = AppSettings.autoDownloadPausedUntil
     private let loadedVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
 
     init() {
@@ -146,6 +148,14 @@ final class AgentModel {
             let finished = Set(external.map(\.key)).subtracting(now.map(\.key))
             external = now
             if !finished.isEmpty { await check(download: false) }
+            // Fin de la pause (au bout d'une heure) : le bouton repasse sur « pause » et les téléchargements reprennent.
+            let paused = AppSettings.autoDownloadPausedUntil
+            if pausedUntil != nil && paused == nil {
+                pausedUntil = nil
+                model.downloads.resumeAfterPause()
+                await check(download: !Agent.appIsOpen)
+            }
+            pausedUntil = paused
             try? await Task.sleep(for: .seconds(2))
         }
     }
@@ -187,6 +197,22 @@ final class AgentModel {
         lastCheck = Date()
         if download { model.autoDownloadTick() }
         Agent.setDownloading(!model.downloads.active.isEmpty)
+    }
+
+    /// Pause d'une heure des téléchargements (automatiques ou non), ou reprise.
+    func togglePause() {
+        if pausedUntil != nil {
+            AppSettings.autoDownloadPausedUntil = nil
+            pausedUntil = nil
+            model.downloads.resumeAfterPause()
+            Task { await check(download: !Agent.appIsOpen) }
+        } else {
+            let until = Date().addingTimeInterval(AppSettings.pauseDuration)
+            AppSettings.autoDownloadPausedUntil = until
+            pausedUntil = until
+            model.downloads.stopForPause()   // l'app ouverte arrête les siens d'elle-même dans la seconde
+            Agent.setDownloading(!model.downloads.active.isEmpty)
+        }
     }
 
     func downloadAll() {
@@ -237,9 +263,22 @@ struct AgentPanel: View {
             }
             Divider()
             DiskSpaceLabel(model: model)
-            Label(model.settings.autoDownload ? "Téléchargement automatique activé" : "Téléchargement automatique désactivé",
-                  systemImage: model.settings.autoDownload ? "arrow.triangle.2.circlepath" : "pause.circle")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                if let until = agent.pausedUntil {
+                    Label("Téléchargements en pause jusqu'à \(until.formatted(date: .omitted, time: .shortened))",
+                          systemImage: "pause.circle")
+                } else if model.settings.autoDownload {
+                    Label("Téléchargement automatique activé", systemImage: "arrow.triangle.2.circlepath")
+                } else {
+                    Label("Téléchargement automatique désactivé", systemImage: "pause.circle")
+                }
+                Spacer()
+                Button { agent.togglePause() } label: {
+                    Image(systemName: agent.pausedUntil == nil ? "pause.fill" : "play.fill")
+                }
+                .help(agent.pausedUntil == nil ? "Mettre les téléchargements en pause pendant 1 heure" : "Reprendre maintenant")
+            }
+            .font(.caption).foregroundStyle(.secondary)
             if let date = agent.lastCheck {
                 Text("Vérifié \(date.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.tertiary)
             }

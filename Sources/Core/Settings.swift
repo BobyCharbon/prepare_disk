@@ -59,6 +59,13 @@ final class AppSettings {
     var removeOldVersions: Bool = true { didSet { defaults.set(removeOldVersions, forKey: "removeOldVersions") } }
     /// Télécharge tout seul les versions validées (Mac de production).
     var autoDownload: Bool = false { didSet { defaults.set(autoDownload, forKey: "autoDownload") } }
+    /// Pause des téléchargements (bouton de l'icône) : jusqu'à cette date, nil sinon.
+    /// Lue directement dans les préférences : l'app et l'icône voient la même pause.
+    static var autoDownloadPausedUntil: Date? {
+        get { (UserDefaults.standard.object(forKey: "autoDownloadPausedUntil") as? Date).flatMap { $0 > Date() ? $0 : nil } }
+        set { UserDefaults.standard.set(newValue, forKey: "autoDownloadPausedUntil") }
+    }
+    static let pauseDuration: TimeInterval = 3600
 
     init() { reload() }
 

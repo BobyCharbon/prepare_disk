@@ -16,6 +16,7 @@ final class DownloadJob: Identifiable {
     }
 
     let id = UUID()
+    let created = Date()
     let kind: Kind
     let title: String
     var state: State = .queued
@@ -221,6 +222,7 @@ final class DownloadManager {
                         // Annulations demandées depuis l'app (ou depuis l'icône).
                         let cancels = SharedDownloads.takeCancelRequests()
                         for job in jobs where cancels.contains(job.key) && !job.isFinished { cancel(job) }
+                        stopForPause()
                         try? await Task.sleep(for: .seconds(1))
                     }
                     SharedDownloads.publish([])
@@ -517,6 +519,30 @@ final class DownloadManager {
                 job.state = .failed(error.localizedDescription)
             }
         }
+    }
+
+    /// Téléchargements arrêtés par la pause, relancés à la fin de celle-ci.
+    private var paused: [DownloadJob.Kind] = []
+
+    /// Pause demandée depuis l'icône : arrête les téléchargements lancés avant la pause (le fichier partiel reste,
+    /// ils reprennent où ils en étaient). Retirés de la liste : ce n'est pas une annulation, ils seront relancés.
+    /// Un téléchargement lancé à la main pendant la pause continue.
+    func stopForPause() {
+        guard let until = AppSettings.autoDownloadPausedUntil else { return }
+        let start = until.addingTimeInterval(-AppSettings.pauseDuration)
+        for job in active where job.created < start {
+            paused.append(job.kind)
+            cancel(job)
+            jobs.removeAll { $0 === job }
+        }
+    }
+
+    /// Fin de la pause (bouton lecture ou au bout d'une heure) : relance ce qu'elle avait arrêté.
+    func resumeAfterPause() {
+        guard AppSettings.autoDownloadPausedUntil == nil, !paused.isEmpty else { return }
+        let kinds = paused
+        paused = []
+        for kind in kinds { enqueue(kind) }
     }
 
     func cancel(_ job: DownloadJob) {

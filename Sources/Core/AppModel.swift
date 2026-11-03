@@ -357,7 +357,7 @@ final class AppModel {
     /// Met en téléchargement tout ce qui manque. Un échec est retenté de plus en plus tard, sans fin mais sans inonder.
     func autoDownloadTick() {
         // Pendant que l'agent d'arrière-plan travaille, c'est lui qui télécharge.
-        guard settings.autoDownload, !preparer.isRunning, !Agent.isDownloading else { return }
+        guard settings.autoDownload, AppSettings.autoDownloadPausedUntil == nil, !preparer.isRunning, !Agent.isDownloading else { return }
         for kind in validatedChecklist().compactMap(\.download) {
             let key = DownloadJob(kind: kind).key
             if downloads.active.contains(where: { $0.key == key }) { continue }
@@ -412,6 +412,7 @@ final class AppModel {
                 await self.refreshSetup()
                 // Même fenêtre en arrière-plan (Mac de production) : la page reste à jour toute seule.
                 if !self.library.isScanning { await self.library.scan() }
+                self.downloads.resumeAfterPause()
                 self.autoDownloadTick()
             }
         }
