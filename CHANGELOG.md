@@ -3,6 +3,11 @@
 Chaque version commence par `## numéro — date`, suivi de quelques lignes simples.
 C'est ce texte qui s'affiche sur GitHub et dans l'app (Réglages › Mise à jour).
 
+## 1.5.11 — 4 novembre 2026
+
+- L'icône de la barre des menus devient une petite app à part : un clic sur Prepare Disk ouvre toujours la fenêtre du premier coup, et quitter l'app ne touche plus à l'icône.
+- Après une mise à jour, l'icône ne reste plus bloquée sur l'ancienne version.
+
 ## 1.5.10 — 3 novembre 2026
 
 - Bouton pause dans l'icône de la barre des menus : les téléchargements s'arrêtent pendant 1 heure, puis reprennent tout seuls où ils en étaient. Le bouton lecture les relance tout de suite.

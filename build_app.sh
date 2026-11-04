@@ -36,16 +36,42 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
+# L'agent de la barre des menus : sa propre petite app, avec sa propre identité (même programme, lancé avec --agent).
+AGENT="$APP/Contents/Library/LoginItems/Prepare Disk Agent.app"
+mkdir -p "$AGENT/Contents/MacOS" "$AGENT/Contents/Resources"
+cp .build/release/PrepareDisk "$AGENT/Contents/MacOS/PrepareDisk"
+cp Icon/AppIcon.icns "$AGENT/Contents/Resources/AppIcon.icns"
+cat > "$AGENT/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>Prepare Disk</string>
+    <key>CFBundleDisplayName</key><string>Prepare Disk</string>
+    <key>CFBundleIdentifier</key><string>com.bobycharbon.preparedisk.agent</string>
+    <key>CFBundleExecutable</key><string>PrepareDisk</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>LSUIElement</key><true/>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+</dict>
+</plist>
+EOF
 # Signature : Developer ID (app reconnue par macOS partout, notarisable), sinon le certificat « Prepare Disk »,
 # sinon ad hoc. Un certificat fixe garde l'Accès complet au disque d'une version à l'autre.
 DEVELOPER_ID=$(security find-identity -v -p codesigning | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
 if [ -n "$DEVELOPER_ID" ]; then
     # Runtime renforcé + horodatage : obligatoires pour la notarisation d'Apple.
+    codesign --force --options runtime --timestamp --sign "$DEVELOPER_ID" "$AGENT"   # l'agent d'abord, puis l'app qui le contient
     codesign --force --options runtime --timestamp --sign "$DEVELOPER_ID" "$APP"
 elif security find-identity -p codesigning | grep -q '"Prepare Disk"'; then
+    codesign --force --sign "Prepare Disk" "$AGENT"   # l'agent d'abord, puis l'app qui le contient
     codesign --force --sign "Prepare Disk" "$APP"
 else
     echo "ATTENTION : aucun certificat dans le trousseau, signature ad hoc."
+    codesign --force --sign - "$AGENT"   # l'agent d'abord, puis l'app qui le contient
     codesign --force --sign - "$APP"
 fi
 # Notarisation par Apple : une app téléchargée s'ouvre sans avertissement, et macOS accepte de lancer l'agent

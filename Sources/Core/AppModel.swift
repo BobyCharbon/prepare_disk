@@ -212,16 +212,21 @@ final class AppModel {
         // Idem s'il ne démarre plus (EX_CONFIG : l'app a été supprimée puis remise au même endroit).
         let job = await Shell.run("/bin/launchctl", ["print", "gui/\(getuid())/com.bobycharbon.preparedisk.agent"])
         let loaded = job.status == 0 && (job.output.contains("state = running") || !job.output.contains("EX_CONFIG"))
-        if UserDefaults.standard.string(forKey: "agentRegisteredPath") != path || (agent.status == .enabled && !loaded) {
+        if UserDefaults.app.string(forKey: "agentRegisteredPath") != path || (agent.status == .enabled && !loaded) {
             try? await agent.unregister()
         }
         if agent.status != .enabled {
             do {
                 try agent.register()
-                UserDefaults.standard.set(path, forKey: "agentRegisteredPath")
+                UserDefaults.app.set(path, forKey: "agentRegisteredPath")
             } catch {
                 log.add("ATTENTION : agent de la barre des menus non installé : \(error.localizedDescription)")
             }
+        }
+        // Agent d'une version d'avant la 1.5.11 encore en marche (sans sa propre identité) : relancé une fois.
+        if agent.status == .enabled, !Agent.isDownloading,
+           NSRunningApplication.runningApplications(withBundleIdentifier: Agent.appID + ".agent").isEmpty {
+            _ = await Shell.run("/bin/launchctl", ["kickstart", "-k", "gui/\(getuid())/com.bobycharbon.preparedisk.agent"])
         }
         agentStatus = agent.status
     }

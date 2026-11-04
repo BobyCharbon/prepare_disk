@@ -33,7 +33,7 @@ struct ValidatedVersions: Codable, Equatable {
 @Observable
 final class ValidatedStore {
     static let path = "validated-versions.json"
-    private let defaults = UserDefaults.standard
+    private let defaults = UserDefaults.app
 
     /// Dernière liste publiée connue (gardée hors connexion).
     var published: ValidatedVersions? {

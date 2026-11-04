@@ -20,7 +20,7 @@ final class Helper {
     func check() async {
         var installed = await installedVersion()
         if let current = installed, current != Self.version, Int(current) ?? 0 >= 3 {
-            _ = await run(["selfupdate", Bundle.main.bundlePath])
+            _ = await run(["selfupdate", Agent.appBundle.bundlePath])
             installed = await installedVersion()
         }
         isReady = installed == Self.version
@@ -66,7 +66,7 @@ final class Helper {
     /// Le script de l'assistant (bash, exécuté en root). Chaque commande vérifie ce qu'on lui demande.
     /// Le script de l'assistant (bash, exécuté en root), livré dans l'app signée (Resources/helper.sh).
     nonisolated static var script: String {
-        Bundle.main.url(forResource: "helper", withExtension: "sh").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+        Agent.appBundle.url(forResource: "helper", withExtension: "sh").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
     }
 
     /// Version de l'assistant livrée avec cette app (ligne HELPER_VERSION=… du script).

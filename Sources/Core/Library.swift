@@ -55,7 +55,7 @@ struct LocalFile: Identifiable, Hashable {
 /// Mis en cache (chemin, taille, date) : la lecture prend ~0,2 s.
 private func ipswManifest(_ path: String, size: Int64, date: Date) -> (version: String, build: String, productTypes: [String])? {
     let key = "\(path)|\(size)|\(date.timeIntervalSince1970)"
-    var cache = UserDefaults.standard.dictionary(forKey: "ipswManifestCache3") as? [String: [String]] ?? [:]
+    var cache = UserDefaults.app.dictionary(forKey: "ipswManifestCache3") as? [String: [String]] ?? [:]
     if let hit = cache[key], hit.count == 3 { return (hit[0], hit[1], hit[2].split(separator: " ").map(String.init)) }
     let process = Process()
     let pipe = Pipe()
@@ -71,7 +71,7 @@ private func ipswManifest(_ path: String, size: Int64, date: Date) -> (version: 
           let build = plist["ProductBuildVersion"] as? String else { return nil }
     let types = plist["SupportedProductTypes"] as? [String] ?? []
     cache[key] = [version, build, types.joined(separator: " ")]   // les identifiants contiennent des virgules (iPad13,18)
-    UserDefaults.standard.set(cache, forKey: "ipswManifestCache3")
+    UserDefaults.app.set(cache, forKey: "ipswManifestCache3")
     return (version, build, types)
 }
 
@@ -90,7 +90,7 @@ struct Suggestion: Identifiable, Hashable {
 @Observable
 final class Library {
     private let settings: AppSettings
-    private let defaults = UserDefaults.standard
+    private let defaults = UserDefaults.app
 
     var installers: [LocalInstaller] = []
     var signatures: [String: SignatureState] = [:]
@@ -213,10 +213,15 @@ final class Library {
         let query = "kMDItemFSName == '*.ipsw'c || (kMDItemFSName == 'Install macOS*' && kMDItemContentType == 'com.apple.application-bundle')"
         var paths = Set(await Shell.run("/usr/bin/mdfind", [query]).output.split(separator: "\n").map(String.init))
         let downloads = NSHomeDirectory() + "/Downloads"
-        for name in (try? FileManager.default.contentsOfDirectory(atPath: downloads)) ?? [] { paths.insert(downloads + "/" + name) }
-
         let home = NSHomeDirectory()
-        let skipped = ["/Volumes/", "/private/", "/System/", "/Library/", home + "/Library/", home + "/.Trash/", settings.dataFolder + "/"]
+        var skipped = ["/Volumes/", "/private/", "/System/", "/Library/", home + "/Library/", home + "/.Trash/", settings.dataFolder + "/"]
+        if Agent.isAgent {
+            // L'agent n'a pas les autorisations de l'app : il ne touche pas aux dossiers protégés par macOS
+            // (sinon une demande d'accès surgirait en arrière-plan). L'app ouverte les regarde, elle.
+            skipped += [downloads + "/", home + "/Desktop/", home + "/Documents/"]
+        } else {
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: downloads)) ?? [] { paths.insert(downloads + "/" + name) }
+        }
         let candidates = paths.filter { path in
             !skipped.contains { path.hasPrefix($0) } && !path.contains(".app/")
                 && (path as NSString).deletingLastPathComponent != "/Applications"
@@ -412,7 +417,7 @@ final class Library {
     enum Certification { case certified, checking, corrupted, unknown }
 
     /// Fichiers certifiés, retenus par « chemin|taille|date » : un fichier modifié est revérifié.
-    private var certified: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "certifiedFiles") ?? []) {
+    private var certified: Set<String> = Set(UserDefaults.app.stringArray(forKey: "certifiedFiles") ?? []) {
         didSet { defaults.set(Array(certified), forKey: "certifiedFiles") }
     }
     var checking: Set<String> = []

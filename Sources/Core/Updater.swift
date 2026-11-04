@@ -26,11 +26,11 @@ final class Updater {
     /// Pour remplacer l'app quand on n'a pas le droit de le faire soi-même (compte standard, /Applications).
     var helper: Helper?
 
-    var currentVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
+    var currentVersion: String { Agent.appBundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
 
     /// Nouveautés de la version installée, lues dans le CHANGELOG.md copié dans l'app.
     var currentNotes: String {
-        guard let url = Bundle.main.url(forResource: "CHANGELOG", withExtension: "md"),
+        guard let url = Agent.appBundle.url(forResource: "CHANGELOG", withExtension: "md"),
               let text = try? String(contentsOf: url, encoding: .utf8) else { return "" }
         return Self.notes(in: text, version: currentVersion)
     }
@@ -97,7 +97,7 @@ final class Updater {
             return fail("la signature de la nouvelle version n'est pas la bonne.")
         }
 
-        var current = Bundle.main.bundlePath
+        var current = Agent.appBundle.bundlePath
         if !Self.replace(current, with: newApp) {
             // Pas le droit d'écrire ici : l'assistant système (sans mot de passe) s'en charge.
             if let helper, helper.isReady, await helper.run(["update", newApp, current]).status == 0 {
@@ -114,7 +114,7 @@ final class Updater {
     }
 
     /// Relance l'app une fois cette instance fermée.
-    static func relaunch(_ path: String = Bundle.main.bundlePath) {
+    static func relaunch(_ path: String = Agent.appBundle.bundlePath) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", "sleep 1; /usr/bin/open \(Shell.quote(path))"]
@@ -162,7 +162,7 @@ final class Updater {
 
     private static func installForUser(_ newApp: String) -> String? {
         let fm = FileManager.default
-        guard Bundle.main.bundlePath != userCopy else { return nil }
+        guard Agent.appBundle.bundlePath != userCopy else { return nil }
         try? fm.createDirectory(atPath: (userCopy as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try? fm.removeItem(atPath: userCopy)
         return (try? fm.moveItem(atPath: newApp, toPath: userCopy)) != nil ? userCopy : nil
@@ -170,9 +170,9 @@ final class Updater {
 
     /// Une version plus récente attend dans ~/Applications (mise à jour faite sans administrateur).
     nonisolated static var newerUserCopy: String? {
-        guard Bundle.main.bundlePath != userCopy,
+        guard Agent.appBundle.bundlePath != userCopy,
               let version = Bundle(path: userCopy)?.infoDictionary?["CFBundleShortVersionString"] as? String,
-              let mine = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              let mine = Agent.appBundle.infoDictionary?["CFBundleShortVersionString"] as? String,
               version.isNewerVersion(than: mine) else { return nil }
         return userCopy
     }

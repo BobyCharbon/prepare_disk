@@ -1,6 +1,11 @@
 import Foundation
 import Observation
 
+extension UserDefaults {
+    /// Les réglages de l'app, aussi pour l'agent (qui a sa propre identité, donc ses propres préférences).
+    static let app: UserDefaults = Agent.isAgent ? UserDefaults(suiteName: Agent.appID) ?? .standard : .standard
+}
+
 /// Un appareil dont on garde l'IPSW (iPad) : le nom sert aussi de dossier dans OS/iOS.
 struct Device: Codable, Hashable, Identifiable {
     var id = UUID()
@@ -24,7 +29,7 @@ struct Device: Codable, Hashable, Identifiable {
 @MainActor
 @Observable
 final class AppSettings {
-    private let defaults = UserDefaults.standard
+    private let defaults = UserDefaults.app
 
     /// Les 3 versions macOS choisies ("" = emplacement vide).
     var selected: [String] = ["", "", ""] {
@@ -62,8 +67,8 @@ final class AppSettings {
     /// Pause des téléchargements (bouton de l'icône) : jusqu'à cette date, nil sinon.
     /// Lue directement dans les préférences : l'app et l'icône voient la même pause.
     static var autoDownloadPausedUntil: Date? {
-        get { (UserDefaults.standard.object(forKey: "autoDownloadPausedUntil") as? Date).flatMap { $0 > Date() ? $0 : nil } }
-        set { UserDefaults.standard.set(newValue, forKey: "autoDownloadPausedUntil") }
+        get { (UserDefaults.app.object(forKey: "autoDownloadPausedUntil") as? Date).flatMap { $0 > Date() ? $0 : nil } }
+        set { UserDefaults.app.set(newValue, forKey: "autoDownloadPausedUntil") }
     }
     static let pauseDuration: TimeInterval = 3600
 
@@ -71,7 +76,7 @@ final class AppSettings {
 
     /// Relit les préférences (l'agent d'arrière-plan suit ainsi les changements faits dans l'app).
     func reload() {
-        let d = UserDefaults.standard
+        let d = UserDefaults.app
         func bool(_ key: String, _ fallback: Bool) -> Bool { d.object(forKey: key) as? Bool ?? fallback }
         // N'écrit que ce qui a changé (chaque écriture est enregistrée dans les préférences).
         func set<T: Equatable>(_ key: ReferenceWritableKeyPath<AppSettings, T>, _ value: T) {

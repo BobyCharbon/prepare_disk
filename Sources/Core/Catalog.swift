@@ -85,7 +85,7 @@ final class Catalog {
               let catalog = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let products = catalog["Products"] as? [String: [String: Any]] else { return }
         // Version et build sont dans la « distribution » de chaque produit (gardée en cache : elle ne change pas).
-        var cache = UserDefaults.standard.dictionary(forKey: "installerPackageCache") as? [String: [String]] ?? [:]
+        var cache = UserDefaults.app.dictionary(forKey: "installerPackageCache") as? [String: [String]] ?? [:]
         var found: [String: InstallerPackage] = [:]
         await withTaskGroup(of: (String, [String]?).self) { group in
             for (id, product) in products {
@@ -113,7 +113,7 @@ final class Catalog {
                 found[info[1]] = InstallerPackage(version: info[0], build: info[1], url: url, size: size)
             }
         }
-        UserDefaults.standard.set(cache, forKey: "installerPackageCache")
+        UserDefaults.app.set(cache, forKey: "installerPackageCache")
         packages = found
     }
 

@@ -16,19 +16,24 @@ enum Launcher {
             open.waitUntilExit()
             exit(0)
         }
-        // Une seule fenêtre Prepare Disk : un deuxième lancement ramène celle déjà ouverte.
-        // L'agent se note par son numéro de processus : vu d'ailleurs, il passe pour une app normale.
-        let agentPid = NSHomeDirectory() + "/Library/Application Support/PrepareDisk/agent-process.pid"
-        if agent {
-            try? FileManager.default.createDirectory(atPath: (agentPid as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            try? String(getpid()).write(toFile: agentPid, atomically: true, encoding: .utf8)
-        } else {
-            let agentProcess = (try? String(contentsOfFile: agentPid, encoding: .utf8)).flatMap { Int32($0) }
-            if let other = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
-                .first(where: { $0.processIdentifier != getpid() && $0.processIdentifier != agentProcess && $0.activationPolicy == .regular }) {
-                other.activate()
-                exit(0)
+        // L'agent a sa propre petite app (Contents/Library/LoginItems), avec sa propre identité : sinon macOS
+        // le confond avec l'app (clic sur l'app envoyé à l'agent, « Quitter » qui arrête l'agent, icône cachée).
+        // macOS lance toujours le programme de l'app avec « --agent » : on passe la main à celui de l'agent.
+        if agent && !Agent.isAgent {
+            let inner = Bundle.main.bundlePath + "/" + Agent.innerPath + "/Contents/MacOS/PrepareDisk"
+            // Pendant une mise à jour, l'app peut être encore en cours de copie : on lui laisse quelques secondes.
+            for _ in 0..<10 where !FileManager.default.isExecutableFile(atPath: inner) { sleep(1) }
+            if FileManager.default.isExecutableFile(atPath: inner) {
+                let args = [inner] + CommandLine.arguments.dropFirst()
+                var cArgs = args.map { strdup($0) } + [nil]
+                execv(inner, &cArgs)   // ne revient qu'en cas d'échec : l'agent tourne alors comme avant
             }
+        }
+        // Une seule fenêtre Prepare Disk : un deuxième lancement ramène celle déjà ouverte.
+        if !agent, let other = NSRunningApplication.runningApplications(withBundleIdentifier: Agent.appID)
+            .first(where: { $0.processIdentifier != getpid() && $0.activationPolicy == .regular }) {
+            other.activate()
+            exit(0)
         }
         if agent {
             AgentApp.main()   // LSUIElement : jamais dans le Dock
@@ -72,6 +77,15 @@ final class AgentDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 enum Agent {
     static let plist = "com.bobycharbon.preparedisk.agent.plist"
+    nonisolated static let appID = "com.bobycharbon.preparedisk"
+    nonisolated static let innerPath = "Contents/Library/LoginItems/Prepare Disk Agent.app"
+    /// Ce processus est l'agent, dans sa propre app.
+    nonisolated static var isAgent: Bool { Bundle.main.bundleIdentifier == appID + ".agent" }
+    /// L'app Prepare Disk (pour l'agent : celle qui le contient).
+    nonisolated static let appBundle: Bundle = isAgent
+        ? Bundle(url: Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
+                    .deletingLastPathComponent().deletingLastPathComponent()) ?? .main
+        : .main
     private static let lock = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/PrepareDisk/agent.pid")
 
     /// L'agent est en train de télécharger : l'app ouverte lui laisse alors les téléchargements.
@@ -91,14 +105,12 @@ enum Agent {
 
     /// La fenêtre de Prepare Disk est ouverte (un autre processus du même programme, avec une icône dans le Dock).
     static var appIsOpen: Bool {
-        NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+        NSRunningApplication.runningApplications(withBundleIdentifier: appID)
             .contains { $0.processIdentifier != getpid() && $0.activationPolicy == .regular }
     }
 
     static func openApp() {
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = !appIsOpen   // l'agent est déjà une « instance » de l'app
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
+        NSWorkspace.shared.openApplication(at: appBundle.bundleURL, configuration: NSWorkspace.OpenConfiguration())
     }
 }
 
@@ -119,6 +131,7 @@ final class AgentModel {
     init() {
         Shell.interactive = false   // jamais de fenêtre de mot de passe : l'assistant système ou rien
         model = AppModel()
+        model.notifier.requestAuthorization()   // l'agent a sa propre autorisation (demandée une fois)
         Task { await loop() }
         Task { await follow() }
     }
@@ -167,6 +180,8 @@ final class AgentModel {
             // L'app a été mise à jour sur le disque : on redémarre (macOS relance l'agent avec la nouvelle version).
             let info = NSDictionary(contentsOfFile: Bundle.main.bundlePath + "/Contents/Info.plist")
             if let onDisk = info?["CFBundleShortVersionString"] as? String, onDisk != loadedVersion { exit(0) }
+            // L'app a été déplacée ou remplacée pendant une mise à jour : on redémarre depuis sa nouvelle place.
+            if !FileManager.default.fileExists(atPath: Bundle.main.bundlePath) { exit(0) }
 
             model.settings.reload()
             let appOpen = Agent.appIsOpen

@@ -23,6 +23,7 @@ apps=$( { mdfind "kMDItemCFBundleIdentifier == '$ID'" 2>/dev/null
                 "${TMPDIR:-/tmp}"/PrepareDisk-update-*/*.app 2>/dev/null; } | sort -u)
 while IFS= read -r app; do
     [ -n "$app" ] && [ -e "$app" ] || continue
+    "$LSREGISTER" -u "$app/Contents/Library/LoginItems/Prepare Disk Agent.app" 2>/dev/null
     "$LSREGISTER" -u "$app" 2>/dev/null
     rm -rf "$app" 2>/dev/null && ok "supprimé : $app"
 done <<< "$apps"
@@ -43,12 +44,14 @@ fi
 
 # 4. Réglages, caches, état des téléchargements, jeton administrateur, autorisations de l'utilisateur.
 defaults delete "$ID" 2>/dev/null
+defaults delete "$ID.agent" 2>/dev/null   # l'agent a ses propres préférences
 rm -rf "$HOME/Library/Application Support/PrepareDisk" \
-       "$HOME/Library/Preferences/$ID.plist" \
+       "$HOME/Library/Preferences/$ID.plist" "$HOME/Library/Preferences/$ID.agent.plist" \
        "$HOME/Library/Caches/$ID" \
        "$HOME/Library/HTTPStorages/$ID" \
        "$HOME/Library/Saved Application State/$ID.savedState"
 tccutil reset All "$ID" >/dev/null 2>&1
+tccutil reset All "$ID.agent" >/dev/null 2>&1
 killall cfprefsd 2>/dev/null
 ok "réglages et autorisations supprimés"
 
